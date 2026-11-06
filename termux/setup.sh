@@ -3,8 +3,10 @@
 # Instala o app e libera as permissões sozinho, usando a Depuração sem fio.
 
 PKG="com.caio.navi"
-APK_URL="https://github.com/CaioAndrade12/navi/releases/download/apk/Navi.apk"
+REPO="CaioAndrade12/Navi"
+APK_URL="https://github.com/$REPO/releases/download/apk/Navi.apk"
 APK="$PREFIX/tmp/Navi.apk"
+TOKEN_FILE="$HOME/.navi_token"   # token do GitHub (o repositório é privado)
 
 azul()  { printf '\033[1;36m%s\033[0m\n' "$*"; }
 verde() { printf '\033[1;32m%s\033[0m\n' "$*"; }
@@ -18,10 +20,10 @@ azul "========================================"
 echo
 
 # 1) Ferramentas
-if ! command -v adb >/dev/null 2>&1; then
+if ! command -v adb >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
   azul "[1/5] Instalando as ferramentas (adb)..."
   yes | pkg update -y >/dev/null 2>&1
-  pkg install -y android-tools curl || { verm "Falhou ao instalar o adb. Verifique a internet."; exit 1; }
+  pkg install -y android-tools curl jq || { verm "Falhou ao instalar o adb. Verifique a internet."; exit 1; }
 else
   azul "[1/5] Ferramentas já instaladas."
 fi
@@ -73,16 +75,45 @@ echo
 # 3) Baixar e instalar o app
 azul "[3/5] Baixando a Navi..."
 mkdir -p "$PREFIX/tmp"
-if [ -f "$HOME/storage/downloads/Navi.apk" ]; then
+rm -f "$APK"
+TOKEN=""
+[ -f "$TOKEN_FILE" ] && TOKEN=$(tr -d ' \r\n' < "$TOKEN_FILE")
+
+baixar_com_token() {
+  ASSET=$(curl -fsSL -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/$REPO/releases/tags/apk" | jq -r '.assets[] | select(.name=="Navi.apk") | .url')
+  [ -n "$ASSET" ] && [ "$ASSET" != "null" ] && \
+    curl -fL --progress-bar -H "Authorization: Bearer $TOKEN" -H "Accept: application/octet-stream" "$ASSET" -o "$APK"
+}
+
+if [ -n "$TOKEN" ] && baixar_com_token; then
+  echo "Baixado do GitHub (repositório privado)."
+elif curl -fsL --progress-bar -o "$APK" "$APK_URL"; then
+  echo "Baixado do GitHub."
+elif [ -f "$HOME/storage/downloads/Navi.apk" ]; then
   cp "$HOME/storage/downloads/Navi.apk" "$APK"
   echo "Usando o Navi.apk da pasta Downloads."
 else
-  curl -fL --progress-bar -o "$APK" "$APK_URL" || { verm "Não consegui baixar o APK."; exit 1; }
+  verm "Não consegui baixar o APK."
+  amar "O repositório é privado: crie um token no GitHub (veja o README) e rode:"
+  amar "  echo SEU_TOKEN > ~/.navi_token && bash setup.sh"
+  amar "Ou baixe o Navi.apk logado no GitHub, deixe em Downloads e rode de novo."
+  exit 1
 fi
+
 azul "Instalando..."
-if ! A install -r "$APK"; then
+OUT=$(A install -r "$APK" 2>&1)
+if echo "$OUT" | grep -q "INSTALL_FAILED_UPDATE_INCOMPATIBLE"; then
+  amar "A chave de assinatura da Navi mudou (troca de segurança)."
+  amar "Vou remover a versão antiga e instalar a nova. Depois, cole a chave do Gemini de novo nos Ajustes."
+  A uninstall "$PKG" >/dev/null 2>&1
+  OUT=$(A install "$APK" 2>&1)
+fi
+if ! echo "$OUT" | grep -q "Success"; then
+  echo "$OUT" | tail -3
   verm "A instalação falhou."
   amar "Na Xiaomi, ative 'Instalar via USB' nas Opções do desenvolvedor e rode de novo."
+  amar "Se aparecer aviso do Play Protect, desative 'Verificar apps via USB' nas Opções do desenvolvedor."
   exit 1
 fi
 verde "App instalado!"
@@ -135,8 +166,9 @@ echo " 1. Toque em 'Ajustes' e cole sua chave grátis do Gemini"
 echo "    (botão 'Pegar chave grátis' abre o Google AI Studio)"
 echo " 2. Com a TV ligada, toque em 'Procurar TV' e depois 'Testar'"
 echo "    (aceite o pedido que aparece na tela da TV)"
-echo " 3. No PC, abra o NaviPC.exe (página de Releases do GitHub)"
-echo "    e pareie em 'Procurar PC' com o código que ele mostrar"
+echo " 3. No PC, abra o NaviPC.exe (Releases do GitHub, logado)."
+echo "    Ícone ✦ perto do relógio > 'Parear um celular'; no celular,"
+echo "    'Procurar PC', digite o código de 8 dígitos e 'Parear'"
 echo " 4. Gmail (opcional): seu e-mail + uma senha de app do Google"
 echo " 5. Xiaomi: 'inicialização automática' e 'pop-up em 2º plano'"
 echo " 6. Volte, toque em 'Ligar' e diga: 'Navi, que horas são?'"

@@ -45,6 +45,7 @@ object MessageStore {
     )
 
     private const val MAX = 300
+    private const val KEEP_MS = 48 * 3600_000L // guarda mensagens só por 48 horas
     private val items = ArrayList<Msg>()
     private var loaded = false
 
@@ -80,9 +81,10 @@ object MessageStore {
     fun add(c: Context, list: List<Msg>) {
         load(c)
         val known = items.map { it.id }.toHashSet()
-        var changed = false
+        var changed = prune()
         for (m in list) {
             if (m.text.isBlank() || m.id in known) continue
+            if (!Prefs.featureEnabled(c, m.app)) continue // app desligado nos ajustes
             items += m
             changed = true
         }
@@ -92,14 +94,29 @@ object MessageStore {
         save(c)
     }
 
+    /** Tira as mensagens antigas. Devolve true se algo mudou. */
+    private fun prune(): Boolean {
+        val limit = System.currentTimeMillis() - KEEP_MS
+        return items.removeAll { it.time < limit }
+    }
+
+    /** Apaga tudo de um app (quando o usuário desliga o acesso a ele). */
+    @Synchronized
+    fun purgeApp(c: Context, app: String) {
+        load(c)
+        if (items.removeAll { it.app == app }) save(c)
+    }
+
     /** Busca mensagens. Marca como lidas as que forem devolvidas. */
     @Synchronized
     fun query(c: Context, app: String?, from: String?, unreadOnly: Boolean, limit: Int): List<Msg> {
         load(c)
+        if (prune()) save(c)
         val wantedApp = app?.lowercase(Locale.ROOT)?.takeIf { it.isNotEmpty() && it != "todos" }
         val who = from?.let { Brain.normalize(it) }?.takeIf { it.isNotEmpty() }
         val res = items.asReversed().asSequence()
             .filter { wantedApp == null || it.app == wantedApp }
+            .filter { Prefs.featureEnabled(c, it.app) }
             .filter { !unreadOnly || !it.read }
             .filter {
                 who == null || Brain.normalize(it.conversation).contains(who) ||

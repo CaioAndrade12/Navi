@@ -346,13 +346,30 @@ def parece_site(alvo):
     return a.startswith(("http://", "https://", "www.")) or bool(re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+(/\S*)?", a))
 
 
+# Tipos que executam código: a Navi não abre esses por caminho (só programas do menu Iniciar).
+PERIGOSOS = {".exe", ".bat", ".cmd", ".com", ".ps1", ".psm1", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh",
+             ".msi", ".msp", ".scr", ".hta", ".jar", ".lnk", ".url", ".reg", ".cpl", ".dll", ".pif", ".appref-ms"}
+
+
+def seguro_para_abrir(alvo):
+    """Bloqueia caminhos de rede, esquemas estranhos (file:, ms-...:) e arquivos executáveis."""
+    a = alvo.strip().strip('"')
+    if a.startswith(("\\\\", "//")):
+        return False, "caminho de rede"
+    if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]+:", a) and not re.match(r"^[a-zA-Z]:[\\/]", a):
+        return False, "endereço especial"
+    if Path(a).suffix.lower() in PERIGOSOS:
+        return False, "arquivo executável"
+    return True, ""
+
+
 @tool("pc_abrir", "Abre um programa (pelo nome, ex.: Chrome, Spotify, Bloco de Notas, Steam, Configurações), "
       "um site (ex.: youtube.com) ou um arquivo/pasta no PC.",
       {"alvo": S("nome do programa, endereço do site ou caminho")}, ["alvo"])
 def pc_abrir(alvo):
     alvo = alvo.strip()
     if parece_site(alvo):
-        url = alvo if alvo.lower().startswith("http") else "https://" + alvo
+        url = alvo if alvo.lower().startswith(("http://", "https://")) else "https://" + alvo
         webbrowser.open(url)
         return ok(f"Abri {url} no navegador.")
     apps = start_apps()
@@ -361,6 +378,11 @@ def pc_abrir(alvo):
         appid = dict(apps)[nome]
         subprocess.Popen(["explorer.exe", f"shell:AppsFolder\\{appid}"])
         return ok(f"Abri {nome}.")
+    seguro, motivo = seguro_para_abrir(alvo)
+    if not seguro:
+        return erro(f"Por segurança não abro isso ({motivo}). Peça um programa pelo nome ou um site.")
+    if not Path(alvo).exists():
+        return erro(f"Não achei \"{alvo}\" no PC.")
     try:
         os.startfile(alvo)
         return ok(f"Abri {alvo}.")

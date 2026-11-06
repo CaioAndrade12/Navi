@@ -81,6 +81,7 @@ class NaviNotificationService : NotificationListenerService() {
             val active = try { svc.activeNotifications.toList() } catch (_: Exception) { emptyList() }
             val candidates = active
                 .filter { MessageStore.APPS.containsKey(it.packageName) }
+                .filter { Prefs.featureEnabled(c, MessageStore.APPS[it.packageName] ?: "") }
                 .filter { app.isNullOrEmpty() || app == "todos" || MessageStore.APPS[it.packageName] == app }
                 .filter { replyAction(it.notification) != null }
             fun convOf(s: StatusBarNotification): String {

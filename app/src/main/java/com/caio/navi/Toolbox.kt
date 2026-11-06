@@ -18,8 +18,17 @@ object Toolbox {
     fun all(c: Context): List<Tool> {
         val app = c.applicationContext
         val base = phoneTools ?: build(app).also { phoneTools = it }
-        return base + PcClient.tools(app)
+        return (base + PcClient.tools(app)).filter { allowed(app, it.feature) }
     }
+
+    private fun allowed(c: Context, feature: String?): Boolean = when (feature) {
+        null -> true
+        "mensagens" -> Prefs.anyMessagingEnabled(c)
+        else -> Prefs.featureEnabled(c, feature)
+    }
+
+    /** Apps de mensagem que o usuário deixou a Navi usar. */
+    private fun enabledApps(c: Context) = Prefs.MESSAGING.filter { Prefs.featureEnabled(c, it) }
 
     private val TV_KEYS = mapOf(
         "home" to "KEY_HOME", "inicio" to "KEY_HOME", "voltar" to "KEY_RETURN", "ok" to "KEY_ENTER",
@@ -42,7 +51,24 @@ object Toolbox {
 
     private suspend fun <T> main(block: () -> T): T = withContext(Dispatchers.Main) { block() }
 
-    private fun build(c: Context): List<Tool> = listOf(
+    /** Marca cada ferramenta com o recurso a que pertence e os cuidados de segurança. */
+    private fun flags(t: Tool): Tool = when {
+        t.name.startsWith("tv_") -> t.with(feature = "tv")
+        t.name == "pc_ligar" -> t.with(feature = "pc", effect = true)
+        t.name == "mensagens_ler" -> t.with(feature = "mensagens", personal = true, untrusted = true)
+        t.name == "mensagem_responder" -> t.with(feature = "mensagens", personal = true, effect = true)
+        t.name == "whatsapp_enviar" -> t.with(feature = "whatsapp", personal = true, effect = true)
+        t.name == "email_enviar" -> t.with(feature = "gmail", personal = true, effect = true)
+        t.name.startsWith("email_") -> t.with(feature = "gmail", personal = true, untrusted = true)
+        t.name == "celular_ligar_para" -> t.with(feature = "ligacoes", personal = true, effect = true)
+        t.name == "pesquisar_web" -> t.with(feature = "web", untrusted = true)
+        t.name.startsWith("memoria_") -> t.with(feature = "memoria", personal = true, effect = true)
+        else -> t
+    }
+
+    private fun build(c: Context): List<Tool> = buildRaw(c).map { flags(it) }
+
+    private fun buildRaw(c: Context): List<Tool> = listOf(
         // ---------------- TV ----------------
         Tool("tv_ligar_desligar", "Liga ou desliga a TV Samsung da sala.",
             obj("estado" to str("ligar ou desligar", listOf("ligar", "desligar")), required = listOf("estado"))
@@ -132,8 +158,11 @@ object Toolbox {
                 "limite" to int("quantas no máximo (padrão 10)"),
             )
         ) { a ->
+            val app = a.s("app").lowercase()
             if (!NaviNotificationService.isEnabled(c)) {
                 fail("A Navi ainda não tem acesso às notificações. Libere em Ajustes da Navi > Acesso às notificações.")
+            } else if (app.isNotEmpty() && app != "todos" && !Prefs.featureEnabled(c, app)) {
+                fail("O acesso ao $app está desligado nos ajustes da Navi.")
             } else {
                 val list = MessageStore.query(c, a.s("app"), a.s("de"), a.optBoolean("so_nao_lidas", true), a.optInt("limite", 10))
                 JSONObject().put("status", "ok").put("quantidade", list.size)
@@ -150,9 +179,14 @@ object Toolbox {
             ),
             confirm = { a -> "Vou responder para ${a.s("para")}: \"${a.s("texto")}\". Pode mandar?" }
         ) { a ->
-            val who = main { NaviNotificationService.reply(c, a.s("para"), a.s("texto"), a.s("app").ifEmpty { null }) }
-            if (who != null) ok("Resposta enviada para $who.")
-            else fail("Não há notificação aberta dessa conversa para responder. Para WhatsApp use whatsapp_enviar.")
+            val app = a.s("app").lowercase()
+            if (app.isNotEmpty() && app != "todos" && !Prefs.featureEnabled(c, app)) {
+                fail("O acesso ao $app está desligado nos ajustes da Navi.")
+            } else {
+                val who = main { NaviNotificationService.reply(c, a.s("para"), a.s("texto"), a.s("app").ifEmpty { null }) }
+                if (who != null) ok("Resposta enviada para $who.")
+                else fail("Não há notificação aberta dessa conversa para responder. Para WhatsApp use whatsapp_enviar.")
+            }
         },
         Tool("whatsapp_enviar", "Envia uma mensagem de WhatsApp para um contato da agenda (pelo nome) ou número.",
             obj("para" to str("nome do contato ou número"), "texto" to str("mensagem"), required = listOf("para", "texto")),

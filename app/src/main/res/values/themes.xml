@@ -1,9 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="NaviTheme" parent="@android:style/Theme.DeviceDefault.DayNight">
-        <item name="android:colorAccent">#4FA3FF</item>
-        <item name="android:windowActionBar">false</item>
-        <item name="android:windowNoTitle">true</item>
+    <!-- Tema escuro azul-marinho da Navi -->
+    <style name="NaviTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:colorPrimary">@color/navi_bg</item>
+        <item name="android:colorPrimaryDark">@color/navi_bg</item>
+        <item name="android:colorAccent">@color/navi_accent</item>
+        <item name="android:colorControlNormal">@color/navi_text2</item>
+        <item name="android:colorControlActivated">@color/navi_accent</item>
+        <item name="android:windowBackground">@color/navi_bg</item>
+        <item name="android:statusBarColor">@color/navi_bg</item>
+        <item name="android:navigationBarColor">@color/navi_bg</item>
+        <item name="android:textColorPrimary">@color/navi_text</item>
+        <item name="android:textColorSecondary">@color/navi_text2</item>
+        <item name="android:textColorHint">#667AA8</item>
     </style>
 
     <style name="Invisible" parent="@android:style/Theme.Translucent.NoTitleBar">
@@ -11,39 +20,64 @@
         <item name="android:windowNoDisplay">false</item>
     </style>
 
-    <!-- Estilos da tela de ajustes -->
-    <style name="Title">
-        <item name="android:layout_width">wrap_content</item>
+    <!-- Ajustes -->
+    <style name="Card">
+        <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginTop">22dp</item>
-        <item name="android:textSize">20sp</item>
+        <item name="android:layout_marginTop">14dp</item>
+        <item name="android:background">@drawable/bg_card</item>
+        <item name="android:orientation">vertical</item>
+        <item name="android:padding">18dp</item>
+    </style>
+
+    <style name="CardTitle">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">@color/navi_text</item>
+        <item name="android:textSize">18sp</item>
         <item name="android:textStyle">bold</item>
     </style>
 
     <style name="Hint">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginTop">4dp</item>
-        <item name="android:alpha">0.75</item>
-        <item name="android:textSize">14sp</item>
+        <item name="android:layout_marginTop">6dp</item>
+        <item name="android:textColor">@color/navi_text2</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:lineSpacingExtra">2dp</item>
     </style>
 
     <style name="Field">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginTop">4dp</item>
+        <item name="android:layout_marginTop">10dp</item>
+        <item name="android:background">@drawable/bg_field</item>
         <item name="android:singleLine">true</item>
+        <item name="android:textColor">@color/navi_text</item>
+        <item name="android:textSize">15sp</item>
     </style>
 
-    <style name="Btn">
+    <style name="BtnPrimary">
         <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_height">48dp</item>
+        <item name="android:layout_marginTop">12dp</item>
+        <item name="android:background">@drawable/bg_btn_primary</item>
+        <item name="android:textColor">#FFFFFF</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:stateListAnimator">@null</item>
     </style>
 
-    <style name="Check">
+    <style name="BtnSecondary">
         <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginTop">4dp</item>
+        <item name="android:layout_height">46dp</item>
+        <item name="android:layout_marginTop">10dp</item>
+        <item name="android:background">@drawable/bg_btn_secondary</item>
+        <item name="android:textColor">@color/navi_text</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:stateListAnimator">@null</item>
     </style>
 
     <style name="Row">
@@ -52,11 +86,20 @@
         <item name="android:orientation">horizontal</item>
     </style>
 
-    <style name="RowBtn">
+    <style name="RowBtn" parent="BtnSecondary">
         <item name="android:layout_width">0dp</item>
-        <item name="android:layout_height">wrap_content</item>
         <item name="android:layout_weight">1</item>
+        <item name="android:layout_marginStart">4dp</item>
+        <item name="android:layout_marginEnd">4dp</item>
     </style>
 
-    <color name="ic_bg">#0E1A3A</color>
+    <style name="SwitchRow">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">8dp</item>
+        <item name="android:minHeight">44dp</item>
+        <item name="android:textColor">@color/navi_text</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:switchPadding">12dp</item>
+    </style>
 </resources>

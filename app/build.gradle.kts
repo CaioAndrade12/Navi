@@ -18,12 +18,17 @@ android {
     }
 
     // Chave de assinatura fixa, para que cada nova versão instale por cima da anterior.
+    // Os dados ficam em app/signing.properties (só no repositório privado).
+    val signing = java.util.Properties().apply {
+        val f = file("signing.properties")
+        if (f.exists()) f.inputStream().use { load(it) }
+    }
     signingConfigs {
         create("navi") {
-            storeFile = file("navi.keystore")
-            storePassword = "navi1234"
-            keyAlias = "navi"
-            keyPassword = "navi1234"
+            storeFile = file(signing.getProperty("storeFile") ?: "navi.keystore")
+            storePassword = signing.getProperty("storePassword") ?: "navi1234"
+            keyAlias = signing.getProperty("keyAlias") ?: "navi"
+            keyPassword = signing.getProperty("keyPassword") ?: "navi1234"
         }
     }
 

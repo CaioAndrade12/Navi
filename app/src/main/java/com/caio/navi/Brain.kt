@@ -1,5 +1,6 @@
 package com.caio.navi
 
+import android.app.KeyguardManager
 import android.content.Context
 import android.util.Base64
 import kotlinx.coroutines.Dispatchers
@@ -35,6 +36,15 @@ class Brain(private val ctx: Context) {
     private var lastUse = 0L
     private var noThinkingConfig = false
     private val lock = Mutex()
+    /** A rodada atual já leu conteúdo de terceiros (mensagens, e-mails, web)? */
+    private var turnTainted = false
+    private var lastLocked: Boolean? = null
+
+    private fun isLocked(): Boolean = try {
+        ctx.getSystemService(KeyguardManager::class.java)?.isDeviceLocked == true
+    } catch (_: Exception) {
+        false
+    }
 
     fun hasPendingQuestion() = pending != null
 
@@ -48,6 +58,10 @@ class Brain(private val ctx: Context) {
             val now = System.currentTimeMillis()
             if (now - lastUse > 30 * 60_000L) reset() // conversa nova depois de 30 min parada
             lastUse = now
+            // Celular acabou de ser bloqueado: esquece a conversa feita com ele desbloqueado.
+            val locked = isLocked()
+            if (locked && lastLocked == false && Prefs.lockProtection(ctx)) reset()
+            lastLocked = locked
             // Se algo der errado no meio, o histórico volta a como estava (nunca fica pela metade).
             var rollbackTo = history.size
             try {
@@ -65,6 +79,7 @@ class Brain(private val ctx: Context) {
                 }
 
                 val userIndex = history.size
+                turnTainted = false
                 history += userContent(text, audioWav)
                 val reply = runLoop(userIndex)
                 // Áudio pesa muito: depois de respondido, troca por um marcador no histórico.
@@ -140,8 +155,15 @@ class Brain(private val ctx: Context) {
                 b.results += fail("Ferramenta desconhecida: $name")
                 continue
             }
-            val question = if (Prefs.confirmActions(ctx) || tool.alwaysConfirm) tool.confirm?.invoke(args) else null
-            if (question != null) {
+            if (tool.personal && Prefs.lockProtection(ctx) && isLocked()) {
+                b.results += fail("O celular está bloqueado. Por segurança, desbloqueie o celular para eu fazer isso.")
+                continue
+            }
+            val normal = tool.alwaysConfirm || (Prefs.confirmActions(ctx) && tool.confirm != null)
+            val byTaint = !normal && turnTainted && tool.effect
+            if (normal || byTaint) {
+                var question = tool.confirm?.invoke(args) ?: genericQuestion(tool, args)
+                if (byTaint) question += " Pergunto porque acabei de ler conteúdo de fora, que pode ter instruções falsas."
                 b.askedAt = System.currentTimeMillis()
                 pending = b
                 return Reply(question, expectReply = true)
@@ -157,7 +179,9 @@ class Brain(private val ctx: Context) {
         val name = call.optString("name")
         val args = call.optJSONObject("args") ?: JSONObject()
         val tool = Toolbox.all(ctx).firstOrNull { it.name == name }
-        b.results += if (tool != null && isYes(userSaid)) {
+        b.results += if (tool != null && tool.personal && Prefs.lockProtection(ctx) && isLocked()) {
+            fail("O celular foi bloqueado antes da confirmação. Desbloqueie e peça de novo.")
+        } else if (tool != null && isYes(userSaid)) {
             runTool(tool, args)
         } else {
             JSONObject().put("status", "cancelado pelo usuário").put("o_usuario_disse", userSaid)
@@ -169,10 +193,21 @@ class Brain(private val ctx: Context) {
         return reply
     }
 
-    private suspend fun runTool(tool: Tool, args: JSONObject): JSONObject = try {
-        tool.run(args)
-    } catch (e: Exception) {
-        fail(e.message ?: e.javaClass.simpleName)
+    private suspend fun runTool(tool: Tool, args: JSONObject): JSONObject {
+        val result = try {
+            tool.run(args)
+        } catch (e: Exception) {
+            fail(e.message ?: e.javaClass.simpleName)
+        }
+        if (tool.untrusted) turnTainted = true
+        return result
+    }
+
+    private fun genericQuestion(tool: Tool, args: JSONObject): String {
+        val what = tool.description.substringBefore(".").trim()
+        val details = args.keys().asSequence().take(3)
+            .joinToString(", ") { k -> "$k: ${args.opt(k)?.toString().orEmpty().take(80)}" }
+        return "Por segurança, confirma esta ação: $what" + (if (details.isNotEmpty()) " ($details)" else "") + ". Posso fazer?"
     }
 
     private fun responsesContent(b: Batch): JSONObject {
@@ -221,7 +256,9 @@ class Brain(private val ctx: Context) {
     private fun systemPrompt(): String {
         val name = Prefs.userName(ctx).ifEmpty { "o usuário" }
         val now = SimpleDateFormat("EEEE, dd 'de' MMMM 'de' yyyy, HH:mm", Locale("pt", "BR")).format(Date())
-        val mem = Prefs.memories(ctx)
+        val locked = Prefs.lockProtection(ctx) && isLocked()
+        val mem = if (locked || !Prefs.featureEnabled(ctx, "memoria")) emptyList() else Prefs.memories(ctx)
+        val disabled = Prefs.disabledFeatures(ctx)
         val pcInfo = if (Prefs.pcHost(ctx).isEmpty()) "O PC ainda não foi pareado (peça para configurar nos ajustes da Navi)."
         else "O PC (Windows) está pareado; as ferramentas pc_* falam com ele pela rede de casa."
         val tvInfo = if (Prefs.tvIp(ctx).isEmpty()) "A TV ainda não foi encontrada na rede (peça para tocar em 'Procurar TV' nos ajustes)."
@@ -237,6 +274,12 @@ class Brain(private val ctx: Context) {
             appendLine(tvInfo)
             appendLine(pcInfo)
             appendLine("Agora é $now (horário de Brasília).")
+            if (disabled.isNotEmpty()) {
+                appendLine("O $name DESATIVOU o seu acesso a: ${disabled.joinToString()}. Se pedirem algo disso, explique que está desligado nos ajustes da Navi.")
+            }
+            if (locked) {
+                appendLine("O celular está BLOQUEADO agora. Não revele mensagens, e-mails, contatos nem dados pessoais e não aja no PC; peça para desbloquear. Perguntas gerais, TV e música podem.")
+            }
             if (mem.isNotEmpty()) {
                 appendLine("Coisas que o $name pediu para você lembrar:")
                 mem.forEach { appendLine("- $it") }

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="navi_bg">#0A1330</color>
+    <color name="navi_surface">#121E45</color>
+    <color name="navi_surface2">#1A2A5C</color>
+    <color name="navi_stroke">#26386F</color>
+    <color name="navi_accent">#4FA3FF</color>
+    <color name="navi_accent2">#8B7CFF</color>
+    <color name="navi_text">#EEF3FF</color>
+    <color name="navi_text2">#9DAED6</color>
+    <color name="navi_ok">#3DDC97</color>
+    <color name="navi_warn">#FFB74F</color>
+    <color name="navi_err">#FF6B6B</color>
+    <color name="ic_bg">#0E1A3A</color>
+</resources>

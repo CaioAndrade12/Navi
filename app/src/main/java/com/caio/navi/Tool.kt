@@ -14,8 +14,23 @@ class Tool(
     val confirm: ((JSONObject) -> String?)? = null,
     /** Confirma mesmo se o usuário desligou as confirmações (ex.: PowerShell, desligar o PC). */
     val alwaysConfirm: Boolean = false,
+    /** Recurso que o usuário pode desligar nos ajustes (Prefs.FEATURES); null = sempre ligado. */
+    val feature: String? = null,
+    /** Mexe com dados pessoais: bloqueado com o celular bloqueado. */
+    val personal: Boolean = false,
+    /** Age no mundo (manda, abre, digita...): pede confirmação se a conversa leu conteúdo de fora. */
+    val effect: Boolean = false,
+    /** Devolve texto de terceiros (mensagens, e-mails, web): pode conter instruções maliciosas. */
+    val untrusted: Boolean = false,
     val run: suspend (JSONObject) -> JSONObject,
 ) {
+    fun with(
+        feature: String? = this.feature,
+        personal: Boolean = this.personal,
+        effect: Boolean = this.effect,
+        untrusted: Boolean = this.untrusted,
+    ) = Tool(name, description, params, confirm, alwaysConfirm, feature, personal, effect, untrusted, run)
+
     fun declaration(): JSONObject {
         val d = JSONObject().put("name", name).put("description", description)
         if (params != null) d.put("parameters", params)

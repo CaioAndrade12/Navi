@@ -2,64 +2,103 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/navi_bg"
     android:fitsSystemWindows="true"
     android:orientation="vertical">
 
-    <!-- Topo: nome, status e botões -->
+    <!-- Topo: logo, nome, status e ajustes -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingStart="16dp"
-        android:paddingTop="12dp"
-        android:paddingEnd="8dp"
-        android:paddingBottom="4dp">
+        android:paddingStart="18dp"
+        android:paddingTop="14dp"
+        android:paddingEnd="14dp"
+        android:paddingBottom="10dp">
 
-        <TextView
+        <ImageView
+            android:layout_width="46dp"
+            android:layout_height="46dp"
+            android:background="@drawable/bg_logo"
+            android:contentDescription="Navi"
+            android:padding="2dp"
+            android:src="@drawable/ic_sparkle" />
+
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
             android:layout_weight="1"
-            android:text="Navi ✦"
-            android:textSize="28sp"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Navi"
+                android:textColor="@color/navi_text"
+                android:textSize="24sp"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:id="@+id/statusRow"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <View
+                    android:id="@+id/statusDot"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:layout_marginEnd="6dp" />
+
+                <TextView
+                    android:id="@+id/status"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="Desligada"
+                    android:textColor="@color/navi_text2"
+                    android:textSize="13sp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/toggle"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:background="@drawable/bg_chip"
+            android:gravity="center"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:text="Ligar"
+            android:textColor="@color/navi_text"
+            android:textSize="13sp"
             android:textStyle="bold" />
 
-        <Button
-            android:id="@+id/toggle"
-            style="?android:attr/buttonBarButtonStyle"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Ligar" />
-
-        <Button
+        <ImageButton
             android:id="@+id/settings"
-            style="?android:attr/buttonBarButtonStyle"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Ajustes" />
+            android:layout_width="42dp"
+            android:layout_height="42dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/bg_icon_btn"
+            android:contentDescription="Ajustes"
+            android:src="@drawable/ic_settings" />
     </LinearLayout>
-
-    <TextView
-        android:id="@+id/status"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
-        android:background="#224FA3FF"
-        android:padding="10dp"
-        android:text="Desligada"
-        android:textSize="14sp" />
 
     <TextView
         android:id="@+id/setupHint"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginStart="16dp"
-        android:layout_marginTop="8dp"
         android:layout_marginEnd="16dp"
-        android:background="#33FFB74F"
-        android:padding="10dp"
-        android:text="Falta configurar a chave do Gemini. Toque aqui para abrir os ajustes."
+        android:layout_marginBottom="6dp"
+        android:background="@drawable/bg_card"
+        android:padding="14dp"
+        android:text="⚠️ Falta a chave do Gemini. Toque aqui para configurar (é grátis)."
+        android:textColor="@color/navi_warn"
         android:textSize="14sp"
         android:visibility="gone" />
 
@@ -70,17 +109,36 @@
         android:layout_height="0dp"
         android:layout_weight="1"
         android:clipToPadding="false"
-        android:paddingStart="12dp"
-        android:paddingTop="8dp"
-        android:paddingEnd="12dp"
-        android:paddingBottom="8dp">
+        android:fadingEdgeLength="24dp"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:requiresFadingEdge="vertical">
 
         <LinearLayout
             android:id="@+id/chat"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical" />
+            android:orientation="vertical"
+            android:paddingTop="6dp"
+            android:paddingBottom="12dp" />
     </ScrollView>
+
+    <!-- Sugestões rápidas -->
+    <HorizontalScrollView
+        android:id="@+id/suggestionsScroll"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:clipToPadding="false"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:id="@+id/suggestions"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal" />
+    </HorizontalScrollView>
 
     <!-- Caixa de texto e microfone -->
     <LinearLayout
@@ -88,28 +146,54 @@
         android:layout_height="wrap_content"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:padding="8dp">
+        android:paddingStart="14dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="14dp"
+        android:paddingBottom="14dp">
 
-        <EditText
-            android:id="@+id/input"
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:hint="Fale ou escreva para a Navi"
-            android:imeOptions="actionSend"
-            android:inputType="textCapSentences|textMultiLine"
-            android:maxLines="4" />
+            android:background="@drawable/bg_input"
+            android:gravity="center_vertical"
+            android:minHeight="52dp"
+            android:orientation="horizontal"
+            android:paddingStart="18dp"
+            android:paddingEnd="6dp">
 
-        <Button
-            android:id="@+id/send"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Enviar" />
+            <EditText
+                android:id="@+id/input"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="@null"
+                android:hint="Fale ou escreva para a Navi"
+                android:imeOptions="actionSend"
+                android:inputType="textCapSentences|textMultiLine"
+                android:maxLines="4"
+                android:paddingTop="12dp"
+                android:paddingBottom="12dp"
+                android:textColor="@color/navi_text"
+                android:textSize="16sp" />
 
-        <Button
+            <ImageButton
+                android:id="@+id/send"
+                android:layout_width="42dp"
+                android:layout_height="42dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Enviar"
+                android:src="@drawable/ic_send" />
+        </LinearLayout>
+
+        <ImageButton
             android:id="@+id/mic"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="🎤" />
+            android:layout_width="58dp"
+            android:layout_height="58dp"
+            android:layout_marginStart="10dp"
+            android:background="@drawable/bg_mic"
+            android:contentDescription="Falar com a Navi"
+            android:elevation="6dp"
+            android:src="@drawable/ic_mic" />
     </LinearLayout>
 </LinearLayout>

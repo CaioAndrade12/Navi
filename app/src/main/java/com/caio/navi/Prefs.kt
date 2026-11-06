@@ -22,6 +22,15 @@ object Prefs {
 
     private fun str(c: Context, k: String, d: String = "") = sp(c).getString(k, d) ?: d
     private fun put(c: Context, k: String, v: String) = sp(c).edit().putString(k, v).apply()
+
+    /** Valor guardado criptografado (migra sozinho o que estava em texto puro). */
+    private fun secret(c: Context, k: String): String {
+        val raw = str(c, k)
+        if (raw.isNotEmpty() && !Secrets.isEncrypted(raw)) put(c, k, Secrets.encrypt(raw))
+        return Secrets.decrypt(raw)
+    }
+
+    private fun putSecret(c: Context, k: String, v: String) = put(c, k, Secrets.encrypt(v))
     private fun bool(c: Context, k: String, d: Boolean) = sp(c).getBoolean(k, d)
     private fun putBool(c: Context, k: String, v: Boolean) = sp(c).edit().putBoolean(k, v).apply()
 
@@ -60,8 +69,8 @@ object Prefs {
     }
 
     // ---- Cérebro (Gemini API) ----
-    fun geminiKey(c: Context) = str(c, "gemini_key").trim()
-    fun setGeminiKey(c: Context, v: String) = put(c, "gemini_key", v.trim())
+    fun geminiKey(c: Context) = secret(c, "gemini_key").trim()
+    fun setGeminiKey(c: Context, v: String) = putSecret(c, "gemini_key", v.trim())
     fun geminiModel(c: Context) = str(c, "gemini_model", DEFAULT_MODEL).trim().ifEmpty { DEFAULT_MODEL }
     fun setGeminiModel(c: Context, v: String) = put(c, "gemini_model", v.trim())
     fun userName(c: Context) = str(c, "user_name", "Caio").trim()
@@ -91,16 +100,44 @@ object Prefs {
     /** Endereço do agente do PC, ex.: 192.168.0.15:8765 */
     fun pcHost(c: Context) = str(c, "pc_host").trim()
     fun setPcHost(c: Context, v: String) = put(c, "pc_host", v.trim())
-    fun pcToken(c: Context) = str(c, "pc_token").trim()
-    fun setPcToken(c: Context, v: String) = put(c, "pc_token", v.trim())
+    /** Chave secreta recebida no pareamento (256 bits, em hexadecimal). */
+    fun pcKey(c: Context) = secret(c, "pc_key").trim()
+    fun setPcKey(c: Context, v: String) = putSecret(c, "pc_key", v.trim())
+    fun pcName(c: Context) = str(c, "pc_name")
+    fun setPcName(c: Context, v: String) = put(c, "pc_name", v)
     fun pcMac(c: Context) = str(c, "pc_mac").trim()
     fun setPcMac(c: Context, v: String) = put(c, "pc_mac", v.trim())
 
     // ---- Gmail ----
     fun emailAddress(c: Context) = str(c, "email").trim()
     fun setEmailAddress(c: Context, v: String) = put(c, "email", v.trim())
-    fun emailPassword(c: Context) = str(c, "email_pass").replace(" ", "")
-    fun setEmailPassword(c: Context, v: String) = put(c, "email_pass", v.replace(" ", ""))
+    fun emailPassword(c: Context) = secret(c, "email_pass").replace(" ", "")
+    fun setEmailPassword(c: Context, v: String) = putSecret(c, "email_pass", v.replace(" ", ""))
+
+    // ---- Privacidade e acesso por app ----
+    /** Recursos que podem ser desligados. A chave é usada nas ferramentas (Tool.feature). */
+    val FEATURES = linkedMapOf(
+        "whatsapp" to "WhatsApp",
+        "instagram" to "Instagram",
+        "gmail" to "Gmail",
+        "telegram" to "Telegram",
+        "sms" to "SMS",
+        "tv" to "TV",
+        "pc" to "PC",
+        "ligacoes" to "Ligações",
+        "web" to "Pesquisa na internet",
+        "memoria" to "Memória de longo prazo",
+    )
+    val MESSAGING = listOf("whatsapp", "instagram", "gmail", "telegram", "sms")
+
+    fun featureEnabled(c: Context, f: String) = bool(c, "feat_$f", true)
+    fun setFeatureEnabled(c: Context, f: String, v: Boolean) = putBool(c, "feat_$f", v)
+    fun anyMessagingEnabled(c: Context) = MESSAGING.any { featureEnabled(c, it) }
+    fun disabledFeatures(c: Context) = FEATURES.filterKeys { !featureEnabled(c, it) }.values.toList()
+
+    /** Com o celular bloqueado, não mexe em mensagens, e-mails, ligações, PC nem memórias. */
+    fun lockProtection(c: Context) = bool(c, "lock_protect", true)
+    fun setLockProtection(c: Context, v: Boolean) = putBool(c, "lock_protect", v)
 
     // ---- Memória de longo prazo ----
     fun memories(c: Context): List<String> = try {

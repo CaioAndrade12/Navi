@@ -12,9 +12,10 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Button
-import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.RadioGroup
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import kotlinx.coroutines.CoroutineScope
@@ -26,27 +27,34 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Ajustes: chave do Gemini, TV, PC, Gmail, permissões e palavra de ativação. */
+/** Ajustes: chave do Gemini, privacidade, TV, PC, Gmail, permissões e palavra de ativação. */
 class SettingsActivity : Activity() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private fun et(id: Int) = findViewById<EditText>(id)
-    private fun cb(id: Int) = findViewById<CheckBox>(id)
+    private fun sw(id: Int) = findViewById<Switch>(id)
     private fun btn(id: Int, action: () -> Unit) = findViewById<Button>(id).setOnClickListener { action() }
+    private val dp get() = resources.displayMetrics.density
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
         load()
+        buildAccessList()
 
-        btn(R.id.save) { save(); toast("Ajustes salvos") }
         btn(R.id.btnGetKey) { open(Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/apikey"))) }
         btn(R.id.btnAppPassword) { open(Intent(Intent.ACTION_VIEW, Uri.parse("https://myaccount.google.com/apppasswords"))) }
         btn(R.id.btnTestBrain) { testBrain() }
         btn(R.id.btnFindTv) { findTv() }
         btn(R.id.btnTestTv) { testTv() }
         btn(R.id.btnFindPc) { findPc() }
-        btn(R.id.btnTestPc) { testPc() }
+        btn(R.id.btnPairPc) { pairPc() }
+        btn(R.id.btnRefreshPc) { busy("Atualizando as ações do PC") { "O PC ensinou ${PcClient.refreshTools(this)} ações." } }
+        btn(R.id.btnUnpairPc) {
+            PcClient.unpair(this)
+            refresh()
+            toast("PC despareado. No PC, use 'Desparear todos os celulares' para apagar a chave lá também.")
+        }
         btn(R.id.btnTestEmail) { testEmail() }
 
         btn(R.id.btnMic) { requestRuntimePerms() }
@@ -81,26 +89,53 @@ class SettingsActivity : Activity() {
         refresh()
     }
 
+    override fun onPause() {
+        super.onPause()
+        save()
+    }
+
     override fun onDestroy() {
         scope.cancel()
         super.onDestroy()
+    }
+
+    /** Uma chave liga/desliga para cada app/recurso. Vale na hora. */
+    private fun buildAccessList() {
+        val box = findViewById<LinearLayout>(R.id.accessList)
+        for ((key, label) in Prefs.FEATURES) {
+            val s = Switch(this)
+            s.text = label
+            s.textSize = 15f
+            s.setTextColor(getColor(R.color.navi_text))
+            s.minHeight = (44 * dp).toInt()
+            s.isChecked = Prefs.featureEnabled(this, key)
+            s.setOnCheckedChangeListener { _, on ->
+                Prefs.setFeatureEnabled(this, key, on)
+                if (!on && key in Prefs.MESSAGING) MessageStore.purgeApp(this, key)
+                if (!on && key == "memoria") toast("A Navi não vai usar nem guardar memórias (as já salvas continuam lá até você apagar).")
+            }
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.topMargin = (4 * dp).toInt()
+            s.layoutParams = lp
+            box.addView(s)
+        }
     }
 
     private fun load() {
         et(R.id.geminiKey).setText(Prefs.geminiKey(this))
         et(R.id.geminiModel).setText(Prefs.geminiModel(this))
         et(R.id.userName).setText(Prefs.userName(this))
-        cb(R.id.followUp).isChecked = Prefs.followUp(this)
-        cb(R.id.confirm).isChecked = Prefs.confirmActions(this)
+        sw(R.id.followUp).isChecked = Prefs.followUp(this)
+        sw(R.id.confirm).isChecked = Prefs.confirmActions(this)
+        sw(R.id.lockProtect).isChecked = Prefs.lockProtection(this)
         et(R.id.tvIp).setText(Prefs.tvIp(this))
-        cb(R.id.irEnabled).isChecked = Prefs.irEnabled(this)
+        sw(R.id.irEnabled).isChecked = Prefs.irEnabled(this)
         et(R.id.pcHost).setText(Prefs.pcHost(this))
-        et(R.id.pcToken).setText(Prefs.pcToken(this))
         et(R.id.email).setText(Prefs.emailAddress(this))
         et(R.id.emailPass).setText(Prefs.emailPassword(this))
         et(R.id.words).setText(Prefs.wordsRaw(this))
-        cb(R.id.vibrate).isChecked = Prefs.vibrate(this)
-        cb(R.id.ownBrain).isChecked = Prefs.ownBrain(this)
+        sw(R.id.vibrate).isChecked = Prefs.vibrate(this)
+        sw(R.id.ownBrain).isChecked = Prefs.ownBrain(this)
         findViewById<RadioGroup>(R.id.mode).check(
             when (Prefs.mode(this)) {
                 Prefs.MODE_ASSIST -> R.id.modeAssist
@@ -115,32 +150,31 @@ class SettingsActivity : Activity() {
         Prefs.setGeminiKey(this, et(R.id.geminiKey).text.toString())
         Prefs.setGeminiModel(this, et(R.id.geminiModel).text.toString().ifBlank { Prefs.DEFAULT_MODEL })
         Prefs.setUserName(this, et(R.id.userName).text.toString())
-        Prefs.setFollowUp(this, cb(R.id.followUp).isChecked)
-        Prefs.setConfirmActions(this, cb(R.id.confirm).isChecked)
+        Prefs.setFollowUp(this, sw(R.id.followUp).isChecked)
+        Prefs.setConfirmActions(this, sw(R.id.confirm).isChecked)
+        Prefs.setLockProtection(this, sw(R.id.lockProtect).isChecked)
         val newTvIp = et(R.id.tvIp).text.toString().trim()
         if (newTvIp != Prefs.tvIp(this)) {
             Prefs.setTvIp(this, newTvIp)
             Prefs.setTvToken(this, "")
             Prefs.setTvPort(this, 0)
         }
-        Prefs.setIrEnabled(this, cb(R.id.irEnabled).isChecked)
+        Prefs.setIrEnabled(this, sw(R.id.irEnabled).isChecked)
         val newHost = et(R.id.pcHost).text.toString().trim()
-        if (newHost != Prefs.pcHost(this) && newHost.isEmpty()) PcClient.clearTools(this)
-        Prefs.setPcHost(this, newHost)
-        Prefs.setPcToken(this, et(R.id.pcToken).text.toString())
+        if (newHost.isNotEmpty() || Prefs.pcKey(this).isEmpty()) Prefs.setPcHost(this, newHost)
         Prefs.setEmailAddress(this, et(R.id.email).text.toString())
         Prefs.setEmailPassword(this, et(R.id.emailPass).text.toString())
+        val oldWords = Prefs.wordsRaw(this)
         Prefs.setWords(this, et(R.id.words).text.toString().ifBlank { Prefs.DEFAULT_WORDS })
-        Prefs.setVibrate(this, cb(R.id.vibrate).isChecked)
-        Prefs.setOwnBrain(this, cb(R.id.ownBrain).isChecked)
+        Prefs.setVibrate(this, sw(R.id.vibrate).isChecked)
+        Prefs.setOwnBrain(this, sw(R.id.ownBrain).isChecked)
         Prefs.setMode(this, when (findViewById<RadioGroup>(R.id.mode).checkedRadioButtonId) {
             R.id.modeAssist -> Prefs.MODE_ASSIST
             R.id.modeGemini -> Prefs.MODE_GEMINI
             else -> Prefs.MODE_VOICE
         })
         Prefs.setPauseSec(this, et(R.id.pause).text.toString().toIntOrNull() ?: 12)
-        if (NaviService.running) NaviService.start(this) // reaplica as palavras
-        refresh()
+        if (NaviService.running && oldWords != Prefs.wordsRaw(this)) NaviService.start(this) // reaplica as palavras
     }
 
     // ---------------- Testes ----------------
@@ -152,7 +186,7 @@ class SettingsActivity : Activity() {
             val msg = try {
                 block()
             } catch (e: Exception) {
-                "Erro: ${e.message ?: e.javaClass.simpleName}"
+                "Não deu certo: ${e.message ?: e.javaClass.simpleName}"
             }
             dialog.dismiss()
             AlertDialog.Builder(this@SettingsActivity).setMessage(msg).setPositiveButton("OK", null).show()
@@ -205,21 +239,31 @@ class SettingsActivity : Activity() {
             val found = try { PcClient.discover() } catch (_: Exception) { emptyList() }
             dialog.dismiss()
             if (found.isEmpty()) {
-                toast("Não achei o navi-pc. Ele está aberto no PC e no mesmo Wi-Fi? (libere no Firewall do Windows)")
+                toast("Não achei o NaviPC. Ele está aberto no PC e no mesmo Wi-Fi? (libere no Firewall, rede privada)")
                 return@launch
             }
-            val labels = found.map { "${it.second.optString("name", "PC")} (${it.first})" }.toTypedArray()
+            val labels = found.map {
+                val p = if (it.second.optBoolean("pairing")) " — pronto para parear" else ""
+                "${it.second.optString("name", "PC")} (${it.first})$p"
+            }.toTypedArray()
             AlertDialog.Builder(this@SettingsActivity).setTitle("Qual PC?")
                 .setItems(labels) { _, i ->
                     et(R.id.pcHost).setText(found[i].first)
-                    toast("Agora digite o código de pareamento que aparece no PC e toque em Parear.")
+                    toast("Agora digite o código de 8 dígitos que aparece no PC e toque em Parear.")
                 }.show()
         }
     }
 
-    private fun testPc() = busy("Pareando com o PC") {
-        val n = PcClient.refreshTools(this)
-        "Pareado! O PC ensinou $n ações para a Navi."
+    private fun pairPc() {
+        val host = et(R.id.pcHost).text.toString().trim()
+        val code = et(R.id.pcCode).text.toString().filter { it.isDigit() }
+        if (host.isEmpty()) { toast("Primeiro toque em Procurar PC (ou digite o endereço)."); return }
+        if (code.length != 8) { toast("O código tem 8 dígitos. No PC: ícone ✦ > Parear um celular."); return }
+        busy("Pareando com o PC") {
+            val msg = PcClient.pair(this, host, code)
+            et(R.id.pcCode).setText("")
+            msg
+        }
     }
 
     private fun testEmail() = busy("Entrando no Gmail") {
@@ -248,29 +292,29 @@ class SettingsActivity : Activity() {
 
     private fun refresh() {
         val pm = getSystemService(PowerManager::class.java)
-        fun mark(ok: Boolean) = if (ok) "✅" else "❌"
+        fun mark(ok: Boolean) = if (ok) "✅" else "⚠️"
         findViewById<TextView>(R.id.perms).text = buildString {
-            appendLine("${mark(granted(Manifest.permission.RECORD_AUDIO))} Microfone")
-            appendLine("${mark(Build.VERSION.SDK_INT < 33 || granted(Manifest.permission.POST_NOTIFICATIONS))} Notificações")
-            appendLine("${mark(granted(Manifest.permission.READ_CONTACTS))} Contatos (mandar mensagem pelo nome)")
-            appendLine("${mark(granted(Manifest.permission.CALL_PHONE))} Ligações")
-            appendLine("${mark(NaviNotificationService.isEnabled(this@SettingsActivity))} Acesso às notificações (ler mensagens)")
-            appendLine("${mark(NaviAccessibilityService.isEnabled(this@SettingsActivity))} Acessibilidade (enviar WhatsApp)")
-            appendLine("${mark(Settings.canDrawOverlays(this@SettingsActivity))} Sobrepor outros apps")
-            appendLine("${mark(pm.isIgnoringBatteryOptimizations(packageName))} Sem restrição de bateria")
-            appendLine("${mark(IrRemote.available(this@SettingsActivity))} Infravermelho do celular")
-            append("ℹ️ Na Xiaomi, ative também \"Inicialização automática\" e \"Exibir janelas pop-up em segundo plano\".")
+            appendLine("${mark(granted(Manifest.permission.RECORD_AUDIO))}  Microfone")
+            appendLine("${mark(Build.VERSION.SDK_INT < 33 || granted(Manifest.permission.POST_NOTIFICATIONS))}  Notificações")
+            appendLine("${mark(granted(Manifest.permission.READ_CONTACTS))}  Contatos (mandar mensagem pelo nome)")
+            appendLine("${mark(granted(Manifest.permission.CALL_PHONE))}  Ligações")
+            appendLine("${mark(NaviNotificationService.isEnabled(this@SettingsActivity))}  Acesso às notificações (ler mensagens)")
+            appendLine("${mark(NaviAccessibilityService.isEnabled(this@SettingsActivity))}  Acessibilidade (enviar WhatsApp)")
+            appendLine("${mark(Settings.canDrawOverlays(this@SettingsActivity))}  Sobrepor outros apps")
+            appendLine("${mark(pm.isIgnoringBatteryOptimizations(packageName))}  Sem restrição de bateria")
+            append("${mark(IrRemote.available(this@SettingsActivity))}  Infravermelho do celular")
         }
         val tvIp = Prefs.tvIp(this)
         findViewById<TextView>(R.id.tvInfo).text = when {
             tvIp.isEmpty() -> "Nenhuma TV configurada."
             Prefs.tvToken(this).isNotEmpty() || Prefs.tvPort(this) != 0 ->
-                "TV em $tvIp (pareada, porta ${Prefs.tvPort(this)})" + macLabel(Prefs.tvMac(this))
-            else -> "TV em $tvIp (ainda não pareada: toque em Testar)" + macLabel(Prefs.tvMac(this))
+                "✅ TV em $tvIp (pareada)" + macLabel(Prefs.tvMac(this))
+            else -> "⚠️ TV em $tvIp, ainda não pareada: toque em Testar" + macLabel(Prefs.tvMac(this))
         }
-        val pcCount = PcClient.tools(this).size
-        findViewById<TextView>(R.id.pcInfo).text = if (Prefs.pcHost(this).isEmpty()) "Nenhum PC pareado."
-        else "PC em ${Prefs.pcHost(this)} — $pcCount ações conhecidas" + macLabel(Prefs.pcMac(this))
+        val paired = Prefs.pcKey(this).isNotEmpty()
+        findViewById<TextView>(R.id.pcInfo).text = if (!paired) "Nenhum PC pareado."
+        else "✅ Pareado com ${Prefs.pcName(this).ifEmpty { "o PC" }} em ${Prefs.pcHost(this)} — " +
+            "${PcClient.tools(this).size} ações" + macLabel(Prefs.pcMac(this))
         val mem = Prefs.memories(this)
         findViewById<TextView>(R.id.memories).text =
             if (mem.isEmpty()) "Nada ainda. Diga, por exemplo: \"Navi, lembra que o HDMI 2 é o videogame\"."

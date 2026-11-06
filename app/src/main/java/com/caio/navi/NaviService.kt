@@ -43,6 +43,7 @@ class NaviService : Service(), RecognitionListener {
     companion object {
         const val ACTION_STOP = "com.caio.navi.STOP"
         const val ACTION_TALK = "com.caio.navi.TALK"
+        const val ACTION_STOP_TALK = "com.caio.navi.STOP_TALK"
         private const val CHANNEL = "navi_listen"
         private const val CHANNEL_ALERT = "navi_alert"
         private const val NOTIF_ID = 1
@@ -53,6 +54,9 @@ class NaviService : Service(), RecognitionListener {
         @Volatile var status = "Desligada"
             private set
         @Volatile var listener: ((String) -> Unit)? = null
+        /** true enquanto uma conversa por voz está acontecendo. */
+        @Volatile var talking = false
+            private set
 
         fun start(c: Context) {
             c.startForegroundService(Intent(c, NaviService::class.java))
@@ -60,6 +64,11 @@ class NaviService : Service(), RecognitionListener {
 
         fun stop(c: Context) {
             c.startService(Intent(c, NaviService::class.java).setAction(ACTION_STOP))
+        }
+
+        /** Para a conversa e a fala na hora. */
+        fun stopTalking(c: Context) {
+            c.startService(Intent(c, NaviService::class.java).setAction(ACTION_STOP_TALK))
         }
 
         /** Começa uma conversa agora, sem precisar dizer "Navi". */
@@ -120,6 +129,12 @@ class NaviService : Service(), RecognitionListener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP_TALK) {
+            speaker?.stop()
+            hearer?.stop()
+            conversation?.cancel()
+            return START_STICKY
+        }
         if (intent?.action == ACTION_STOP) {
             Prefs.setEnabled(this, false)
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -244,6 +259,7 @@ class NaviService : Service(), RecognitionListener {
         handler.removeCallbacksAndMessages(null)
         stopListening()
         Prefs.logEvent(this, "conversa iniciada")
+        talking = true
         conversation = scope.launch {
             try {
                 delay(250) // dá tempo do microfone ser liberado
@@ -270,6 +286,8 @@ class NaviService : Service(), RecognitionListener {
             } finally {
                 withContext(kotlinx.coroutines.NonCancellable) {
                     conversation = null
+                    talking = false
+                    setStatus(if (running) "Escutando \"Navi\"..." else "Desligada")
                     if (running) {
                         delay(300)
                         startListening()
