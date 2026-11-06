@@ -63,6 +63,7 @@ object Toolbox {
         t.name == "celular_ligar_para" -> t.with(feature = "ligacoes", personal = true, effect = true)
         t.name == "pesquisar_web" -> t.with(feature = "web", untrusted = true)
         t.name.startsWith("memoria_") -> t.with(feature = "memoria", personal = true, effect = true)
+        t.name == "lembrete_listar" -> t.with(personal = true)
         else -> t
     }
 
@@ -75,18 +76,16 @@ object Toolbox {
         ) { a ->
             ok(if (a.s("estado") == "desligar") SamsungTv.powerOff(c) else SamsungTv.powerOn(c))
         },
-        Tool("tv_volume", "Aumenta, diminui ou coloca no mudo o volume da TV.",
+        Tool("tv_volume", "Consulta ou muda o volume da TV: consultar (diz o volume atual), definir um número exato " +
+            "(0 a 100), aumentar, diminuir, mudo ou tirar o mudo.",
             obj(
-                "acao" to str("o que fazer", listOf("aumentar", "diminuir", "mudo")),
-                "vezes" to int("quantos toques no botão (1 a 20, padrão 3)"),
+                "acao" to str("o que fazer", listOf("consultar", "definir", "aumentar", "diminuir", "mudo", "tirar_mudo")),
+                "nivel" to int("para definir: o volume desejado (0 a 100); para aumentar/diminuir: quantos pontos (padrão 3)"),
                 required = listOf("acao"),
             )
         ) { a ->
-            val n = a.optInt("vezes", 3).coerceIn(1, 20)
-            val key = when (a.s("acao")) { "diminuir" -> "KEY_VOLDOWN"; "mudo" -> "KEY_MUTE"; else -> "KEY_VOLUP" }
-            val keys = if (key == "KEY_MUTE") listOf(key) else List(n) { key }
-            val r = SamsungTv.keysWithFallback(c, keys)
-            ok(if (r == "ok") "Volume ajustado." else r)
+            val nivel = if (a.has("nivel")) a.optInt("nivel") else if (a.has("vezes")) a.optInt("vezes") else null
+            SamsungTv.volumeAction(c, a.s("acao"), nivel)
         },
         Tool("tv_abrir_app", "Abre um app na TV (YouTube, Netflix, Globoplay, Prime Video, Disney+, Spotify, navegador...).",
             obj("app" to str("nome do app"), required = listOf("app"))
@@ -131,13 +130,32 @@ object Toolbox {
         Tool("tv_digitar", "Digita um texto no teclado aberto na TV (ex.: na busca do YouTube) e confirma.",
             obj("texto" to str("texto a digitar"), required = listOf("texto"))
         ) { a -> SamsungTv.type(c, a.s("texto")); ok("Digitei na TV.") },
-        Tool("tv_status", "Diz se a TV está ligada e qual é.") { _ ->
+        Tool("tv_status", "Diz se a TV está ligada, o volume atual, se está no mudo e qual app está aberto.") { _ ->
             val ip = Prefs.tvIp(c)
             if (ip.isEmpty()) fail("TV não configurada.")
             else {
                 val dev = SamsungTv.info(ip)?.optJSONObject("device")
-                JSONObject().put("status", "ok").put("ligada", dev != null)
+                val r = JSONObject().put("status", "ok").put("ligada", dev != null)
                     .put("nome", dev?.optString("name").orEmpty()).put("modelo", dev?.optString("modelName").orEmpty())
+                if (dev != null) {
+                    SamsungTv.volume(c)?.let { r.put("volume", it.level).put("mudo", it.muted == true) }
+                    SamsungTv.visibleApp(c)?.let { r.put("app_aberto", it) }
+                }
+                r
+            }
+        },
+        Tool("tv_youtube", "Toca na TV o primeiro vídeo do YouTube de uma busca (música, clipe, vídeo, trailer).",
+            obj("busca" to str("o que procurar no YouTube"), required = listOf("busca"))
+        ) { a ->
+            if (!SamsungTv.isOn(c)) SamsungTv.powerOn(c)
+            val video = YouTube.first(a.s("busca"))
+            if (video == null) {
+                SamsungTv.openApp(c, "YouTube")
+                ok("Não achei o vídeo, então só abri o YouTube na TV.")
+            } else if (SamsungTv.playYouTube(c, video.id)) {
+                ok("Tocando na TV: ${video.title}.").put("_fim_da_conversa", true)
+            } else {
+                fail("Não consegui mandar o vídeo para a TV. Ela está ligada?")
             }
         },
 
@@ -219,9 +237,51 @@ object Toolbox {
             obj("hora" to int("0-23"), "minuto" to int("0-59"), "rotulo" to str("nome do alarme (opcional)"),
                 required = listOf("hora", "minuto"))
         ) { a -> main { PhoneActions.alarm(c, a.optInt("hora"), a.optInt("minuto"), a.s("rotulo")) } },
-        Tool("celular_timer", "Inicia um timer (cronômetro regressivo) no celular.",
-            obj("segundos" to int("duração em segundos"), "rotulo" to str("nome (opcional)"), required = listOf("segundos"))
-        ) { a -> main { PhoneActions.timer(c, a.optInt("segundos", 60), a.s("rotulo")) } },
+        Tool("celular_timer", "Inicia um timer (contagem regressiva). Quando acabar, a Navi avisa falando e com alarme.",
+            obj("segundos" to int("duração em segundos"), "rotulo" to str("para que é o timer (opcional)"),
+                required = listOf("segundos"))
+        ) { a ->
+            val sec = a.optInt("segundos", 60).coerceIn(5, 24 * 3600)
+            val item = Reminders.add(c, System.currentTimeMillis() + sec * 1000L, a.s("rotulo"), "timer")
+            val dur = if (sec >= 120) "${sec / 60} minutos" + (if (sec % 60 != 0) " e ${sec % 60} segundos" else "") else "$sec segundos"
+            ok("Timer de $dur iniciado. Acaba às ${item.label()}.")
+        },
+        Tool("lembrete_criar", "Cria um lembrete: na hora, a Navi avisa falando e com notificação. Use minutos para " +
+            "\"daqui a X minutos\" ou hora/minuto (e data opcional) para um horário.",
+            obj(
+                "texto" to str("do que lembrar"),
+                "minutos" to int("daqui a quantos minutos (opcional)"),
+                "hora" to int("hora 0-23 (opcional)"),
+                "minuto" to int("minuto 0-59 (opcional)"),
+                "data" to str("data AAAA-MM-DD (opcional; sem data = hoje, ou amanhã se o horário já passou)"),
+                required = listOf("texto"),
+            )
+        ) { a ->
+            val at = PhoneActions.reminderTime(a.optInt("minutos", -1), a.optInt("hora", -1), a.optInt("minuto", 0), a.s("data"))
+            if (at == null) fail("Diga daqui a quanto tempo ou o horário do lembrete.")
+            else {
+                val item = Reminders.add(c, at, a.s("texto"), "lembrete")
+                ok("Lembrete criado para ${item.label()}: ${item.text}.")
+            }
+        },
+        Tool("lembrete_listar", "Lista os lembretes e timers marcados.") { _ ->
+            val list = Reminders.list(c)
+            JSONObject().put("status", "ok").put("lembretes", JSONArray(list.map {
+                JSONObject().put("id", it.id).put("quando", it.label()).put("texto", it.text).put("tipo", it.kind)
+            }))
+        },
+        Tool("lembrete_apagar", "Apaga um lembrete/timer pelo id (de lembrete_listar), ou todos.",
+            obj("id" to int("id do lembrete"), "todos" to bool("apagar todos"))
+        ) { a ->
+            if (a.optBoolean("todos")) {
+                val all = Reminders.list(c)
+                all.forEach { Reminders.remove(c, it.id) }
+                ok("Apaguei ${all.size} lembrete(s).")
+            } else {
+                val r = Reminders.remove(c, a.optInt("id", -1))
+                if (r != null) ok("Apaguei o lembrete: ${r.text}.") else fail("Não achei esse lembrete.")
+            }
+        },
         Tool("celular_abrir_app", "Abre um app no celular.",
             obj("app" to str("nome do app"), required = listOf("app"))
         ) { a -> main { PhoneActions.openApp(c, a.s("app")) } },
@@ -232,9 +292,21 @@ object Toolbox {
         Tool("celular_lanterna", "Liga ou desliga a lanterna do celular.",
             obj("ligar" to bool("true liga, false desliga"), required = listOf("ligar"))
         ) { a -> PhoneActions.flashlight(c, a.optBoolean("ligar", true)) },
-        Tool("celular_tocar_musica", "Toca uma música, artista ou playlist no app de música do celular.",
-            obj("busca" to str("o que tocar"), required = listOf("busca"))
-        ) { a -> main { PhoneActions.playMusic(c, a.s("busca")) } },
+        Tool("celular_tocar_musica", "Toca no celular uma música, artista, álbum, playlist ou estilo (Spotify, YouTube Music " +
+            "ou o app escolhido nos ajustes). Confere se começou a tocar.",
+            obj("busca" to str("o que tocar, ex.: \"Charlie Brown Jr\", \"Só os Loucos Sabem\", \"rock anos 80\""),
+                "app" to str("app pedido pelo usuário (opcional): spotify, youtube music, deezer, youtube..."),
+                required = listOf("busca"))
+        ) { a -> MediaControl.play(c, a.s("busca"), a.s("app").ifEmpty { null }) },
+        Tool("celular_midia", "Controla a música/vídeo tocando no celular: pausar, continuar, próxima, anterior ou parar.",
+            obj("acao" to str("ação", listOf("pausar", "continuar", "proxima", "anterior", "parar")), required = listOf("acao"))
+        ) { a -> MediaControl.control(c, a.s("acao")) },
+        Tool("celular_tocando", "Diz qual música está tocando no celular agora (app, música e artista).") { _ ->
+            val np = MediaControl.nowPlaying(c)
+            np?.put("status", "ok") ?: fail(
+                if (NaviNotificationService.isEnabled(c)) "Nada tocando no celular agora."
+                else "Para eu ver o que está tocando, libere o acesso às notificações nos Ajustes da Navi.")
+        },
         Tool("celular_bateria", "Informa a bateria do celular.") { _ -> PhoneActions.battery(c) },
         Tool("celular_volume", "Ajusta o volume de mídia do celular (0 a 100).",
             obj("nivel" to int("0 a 100"), required = listOf("nivel"))

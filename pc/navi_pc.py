@@ -34,7 +34,7 @@ from pathlib import Path
 
 import acoes
 
-VERSION = "2.2"
+VERSION = "2.3"
 APP_NAME = "NaviPC"
 IS_WIN = sys.platform == "win32"
 BASE = Path(os.environ.get("APPDATA", Path.home())) / APP_NAME
@@ -516,7 +516,51 @@ def autoteste(ci=False):
         progs = acoes.programas()
         reg("programas do menu Iniciar", len(progs) > 0, f"{len(progs)} encontrados", True)
         reg("acentos preservados", not any("\ufffd" in n for n, _, _ in progs), critico=True)
+
+        # Nomes falados: jogos, apelidos e links.
+        nomes = ["Grand Theft Auto V", "Counter-Strike 2", "Red Dead Redemption 2", "Google Chrome", "Steam"]
+        casos = {"gta 5": "Grand Theft Auto V", "cs2": "Counter-Strike 2", "rdr2": "Red Dead Redemption 2",
+                 "chrome": "Google Chrome", "abre a steam": "Steam"}
+        errados = [q for q, esperado in casos.items() if acoes.jogos.melhor(q, nomes)[1] != esperado]
+        reg("entende nomes de jogos e apelidos", not errados, ", ".join(errados), True)
+        links = {"g1 ponto globo ponto com": "g1.globo.com", "github ponto com barra caio andrade 12":
+                 "github.com/caioandrade12", "site da kabum ponto com ponto br": "kabum.com.br"}
+        errados = [f"{q} -> {acoes.link_falado(q)}" for q, esperado in links.items() if acoes.link_falado(q) != esperado]
+        reg("entende links falados", not errados, "; ".join(errados), True)
+        r = acao("pc_jogos", {}, critico=True)
+        linhas[-1] += f" ({len(r.get('jogos', []))} jogos)"
+
+        import tela
+        reg("estrutura da tela (DEVMODEW)", ctypes.sizeof(tela.DEVMODEW) == 220,
+            f"{ctypes.sizeof(tela.DEVMODEW)} bytes", True)
+
+        def sem_travar(nome, args):
+            """A\u00e7\u00f5es de hardware: o PC do GitHub n\u00e3o tem som/monitor, ent\u00e3o "erro" \u00e9 aceit\u00e1vel; travar n\u00e3o."""
+            corpo = json.dumps({"name": nome, "args": args}).encode()
+            st, r = http("POST", "/run", corpo, assinado("POST", "/run", corpo))
+            texto = str(r.get("resultado") or r.get("erro") or r.get("monitores") or "")
+            grave = st != 200 or "violation" in texto.lower() or "TypeError" in texto or "AttributeError" in texto
+            reg(f"a\u00e7\u00e3o {nome} {args} n\u00e3o trava", not grave, f"{r.get('status')}: {texto[:110]}", True)
+            return r
+
+        sem_travar("pc_tela", {"acao": "consultar"})
+        sem_travar("pc_saida_som", {"acao": "listar"})
+        sem_travar("pc_saida_som", {"acao": "listar", "tipo": "microfone"})
+        sem_travar("pc_volume_app", {"acao": "listar"})
+        sem_travar("pc_microfone", {"acao": "consultar"})
+        sem_travar("pc_brilho", {"acao": "consultar"})
+        sem_travar("pc_monitor", {"acao": "consultar"})
         if ci:
+            try:
+                w, h, f = tela.atual()
+                reg("muda a resolu\u00e7\u00e3o (para a mesma)", tela.mudar(w, h, f) == (w, h, f), f"{w}x{h} {f} Hz")
+            except Exception as e:
+                reg("muda a resolu\u00e7\u00e3o (para a mesma)", False, str(e)[:100])
+            try:
+                url, como = acoes.site_por_nome("cobasi")
+                reg("acha site pelo nome", "cobasi" in url, f"{como}: {url[:80]}")
+            except Exception as e:
+                reg("acha site pelo nome", False, str(e)[:100])
             # Só no GitHub: abre e fecha o Bloco de Notas de verdade.
             r = acao("pc_abrir", {"alvo": "Bloco de Notas"}, critico=True)
             j = acoes.janelas.achar("notepad") or acoes.janelas.achar("bloco de notas")

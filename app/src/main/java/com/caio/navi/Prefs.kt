@@ -76,9 +76,22 @@ object Prefs {
     fun userName(c: Context) = str(c, "user_name", "Caio").trim()
     fun setUserName(c: Context, v: String) = put(c, "user_name", v.trim())
 
-    /** Depois de responder, continua ouvindo um pouco sem precisar dizer "Navi". */
-    fun followUp(c: Context) = bool(c, "follow_up", true)
-    fun setFollowUp(c: Context, v: Boolean) = putBool(c, "follow_up", v)
+    /**
+     * Depois de responder, continua ouvindo por alguns segundos sem precisar dizer "Navi"
+     * (ignorando falas que não forem com ela). Desligado: só continua quando a Navi pergunta algo.
+     */
+    fun followUp(c: Context) = bool(c, "follow_up2", false)
+    fun setFollowUp(c: Context, v: Boolean) = putBool(c, "follow_up2", v)
+
+    /** Sensibilidade da palavra de ativação: 0 = baixa (quase nunca sem querer), 1 = normal, 2 = alta. */
+    fun wakeSensitivity(c: Context) = sp(c).getInt("wake_sens", 1).coerceIn(0, 2)
+    fun setWakeSensitivity(c: Context, v: Int) = sp(c).edit().putInt("wake_sens", v.coerceIn(0, 2)).apply()
+
+    /** Sons ao começar e ao parar de ouvir (ids em Sounds.START_OPTIONS / END_OPTIONS). */
+    fun startSound(c: Context) = str(c, "sound_start", "fada")
+    fun setStartSound(c: Context, v: String) = put(c, "sound_start", v)
+    fun endSound(c: Context) = str(c, "sound_end", "fada")
+    fun setEndSound(c: Context, v: String) = put(c, "sound_end", v)
 
     /** Pergunta antes de enviar mensagens, ligar, desligar o PC etc. */
     fun confirmActions(c: Context) = bool(c, "confirm", true)
@@ -138,6 +151,15 @@ object Prefs {
     /** Com o celular bloqueado, não mexe em mensagens, e-mails, ligações, PC nem memórias. */
     fun lockProtection(c: Context) = bool(c, "lock_protect", true)
     fun setLockProtection(c: Context, v: Boolean) = putBool(c, "lock_protect", v)
+
+    // ---- Música no celular ----
+    /** Pacote do app de música preferido ("" = escolher sozinha). */
+    fun musicApp(c: Context) = str(c, "music_app")
+    fun setMusicApp(c: Context, v: String) = put(c, "music_app", v)
+
+    // ---- Lembretes e timers ----
+    fun remindersRaw(c: Context) = str(c, "reminders", "[]")
+    fun setRemindersRaw(c: Context, v: String) = put(c, "reminders", v)
 
     // ---- Memória de longo prazo ----
     fun memories(c: Context): List<String> = try {

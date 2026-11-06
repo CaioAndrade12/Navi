@@ -49,7 +49,9 @@ class SettingsActivity : Activity() {
         btn(R.id.btnTestTv) { testTv() }
         btn(R.id.btnFindPc) { findPc() }
         btn(R.id.btnPairPc) { pairPc() }
-        btn(R.id.btnRefreshPc) { busy("Atualizando as ações do PC") { "O PC ensinou ${PcClient.refreshTools(this)} ações." } }
+        btn(R.id.btnRefreshPc) { busy("Testando o PC") { PcClient.diagnose(this) } }
+        btn(R.id.btnPlayStart) { save(); scope.launch { Sounds.preview(this@SettingsActivity, Prefs.startSound(this@SettingsActivity), true, previewSpeaker()) } }
+        btn(R.id.btnPlayEnd) { save(); scope.launch { Sounds.preview(this@SettingsActivity, Prefs.endSound(this@SettingsActivity), false, previewSpeaker()) } }
         btn(R.id.btnUnpairPc) {
             PcClient.unpair(this)
             refresh()
@@ -96,7 +98,32 @@ class SettingsActivity : Activity() {
 
     override fun onDestroy() {
         scope.cancel()
+        speakerForPreview?.shutdown()
         super.onDestroy()
+    }
+
+    private var speakerForPreview: Speaker? = null
+    private fun previewSpeaker(): Speaker = speakerForPreview ?: Speaker(this).also { speakerForPreview = it }
+
+    /** Preenche um RadioGroup com opções (id → texto) e marca a atual. Ids de view = posição + 1000. */
+    private fun fillRadios(groupId: Int, options: Map<String, String>, current: String) {
+        val g = findViewById<RadioGroup>(groupId)
+        g.removeAllViews()
+        options.entries.forEachIndexed { i, (key, label) ->
+            val rb = android.widget.RadioButton(this)
+            rb.id = 1000 + i
+            rb.text = label
+            rb.tag = key
+            rb.setTextColor(getColor(R.color.navi_text))
+            g.addView(rb)
+            if (key == current) g.check(rb.id)
+        }
+        if (g.checkedRadioButtonId == -1 && g.childCount > 0) g.check(1000)
+    }
+
+    private fun checkedKey(groupId: Int): String? {
+        val g = findViewById<RadioGroup>(groupId)
+        return g.findViewById<android.widget.RadioButton>(g.checkedRadioButtonId)?.tag as? String
     }
 
     /** Uma chave liga/desliga para cada app/recurso. Vale na hora. */
@@ -144,6 +171,13 @@ class SettingsActivity : Activity() {
             }
         )
         et(R.id.pause).setText(Prefs.pauseSec(this).toString())
+        val players = linkedMapOf("" to "Automático (o primeiro instalado)")
+        MediaControl.installed(this).forEach { players[it.pkg] = it.label }
+        fillRadios(R.id.musicApps, players, Prefs.musicApp(this))
+        findViewById<RadioGroup>(R.id.wakeSens).check(
+            when (Prefs.wakeSensitivity(this)) { 0 -> R.id.sensLow; 2 -> R.id.sensHigh; else -> R.id.sensNormal })
+        fillRadios(R.id.startSound, Sounds.START_OPTIONS, Prefs.startSound(this))
+        fillRadios(R.id.endSound, Sounds.END_OPTIONS, Prefs.endSound(this))
     }
 
     private fun save() {
@@ -174,6 +208,14 @@ class SettingsActivity : Activity() {
             else -> Prefs.MODE_VOICE
         })
         Prefs.setPauseSec(this, et(R.id.pause).text.toString().toIntOrNull() ?: 12)
+        checkedKey(R.id.musicApps)?.let { Prefs.setMusicApp(this, it) }
+        Prefs.setWakeSensitivity(this, when (findViewById<RadioGroup>(R.id.wakeSens).checkedRadioButtonId) {
+            R.id.sensLow -> 0
+            R.id.sensHigh -> 2
+            else -> 1
+        })
+        checkedKey(R.id.startSound)?.let { Prefs.setStartSound(this, it) }
+        checkedKey(R.id.endSound)?.let { Prefs.setEndSound(this, it) }
         if (NaviService.running && oldWords != Prefs.wordsRaw(this)) NaviService.start(this) // reaplica as palavras
     }
 

@@ -7,6 +7,10 @@ import android.content.Intent
 /** Religa a Navi depois de reiniciar o celular ou de atualizar o app. */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        try {
+            Reminders.rescheduleAll(context)
+        } catch (_: Exception) {
+        }
         if (!Prefs.enabled(context)) return
         try {
             NaviService.start(context)

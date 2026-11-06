@@ -22,6 +22,9 @@
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+    <!-- Lembretes e timers da própria Navi -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
     <uses-feature android:name="android.hardware.consumerir" android:required="false" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
@@ -92,6 +95,21 @@
             android:turnScreenOn="true"
             android:taskAffinity=""
             android:theme="@style/Invisible" />
+
+        <!-- Acende a tela e mostra o desbloqueio quando a Navi precisa de dados pessoais -->
+        <activity
+            android:name=".UnlockActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:showWhenLocked="true"
+            android:taskAffinity=""
+            android:theme="@style/Invisible"
+            android:turnScreenOn="true" />
+
+        <receiver
+            android:name=".ReminderReceiver"
+            android:exported="false" />
 
         <service
             android:name=".NaviService"

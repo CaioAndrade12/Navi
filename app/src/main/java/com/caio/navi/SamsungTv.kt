@@ -10,6 +10,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -18,6 +22,9 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.concurrent.ConcurrentHashMap
@@ -321,6 +328,229 @@ object SamsungTv {
             "Enviado pelo infravermelho (a TV não respondeu pela rede)."
         } else {
             throw e
+        }
+    }
+
+    // ---------------- Volume exato e estado (UPnP RenderingControl, porta 9197) ----------------
+
+    private const val RC_SERVICE = "urn:schemas-upnp-org:service:RenderingControl:1"
+    @Volatile private var rcControl: Pair<String, String>? = null // (ip da TV, endereço do controle)
+
+    data class VolumeInfo(val level: Int, val muted: Boolean?)
+
+    private fun httpGet(url: String): String? = try {
+        rest.newCall(Request.Builder().url(url).build()).execute().use { r ->
+            if (r.isSuccessful) r.body?.string() else null
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun parseControlUrl(location: String, xml: String): String? {
+        for (m in Regex("<service>(.*?)</service>", RegexOption.DOT_MATCHES_ALL).findAll(xml)) {
+            val block = m.groupValues[1]
+            if (!block.contains("RenderingControl")) continue
+            val ctl = Regex("<controlURL>\\s*(.*?)\\s*</controlURL>").find(block)?.groupValues?.get(1) ?: continue
+            if (ctl.startsWith("http")) return ctl
+            val base = Regex("<URLBase>\\s*(.*?)\\s*</URLBase>").find(xml)?.groupValues?.get(1)?.trimEnd('/')
+                ?: Regex("^(https?://[^/]+)").find(location)?.groupValues?.get(1)
+                ?: return null
+            return base + (if (ctl.startsWith("/")) ctl else "/$ctl")
+        }
+        return null
+    }
+
+    /** Pergunta direto para a TV (SSDP) onde fica a descrição UPnP dela. */
+    private fun ssdpLocation(ip: String): String? = try {
+        DatagramSocket().use { s ->
+            s.soTimeout = 1500
+            val msg = ("M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\n" +
+                "MX: 1\r\nST: $RC_SERVICE\r\n\r\n").toByteArray()
+            s.send(DatagramPacket(msg, msg.size, InetAddress.getByName(ip), 1900))
+            val buf = ByteArray(4096)
+            val end = System.currentTimeMillis() + 1800
+            var loc: String? = null
+            while (loc == null && System.currentTimeMillis() < end) {
+                val p = DatagramPacket(buf, buf.size)
+                try {
+                    s.receive(p)
+                } catch (_: java.net.SocketTimeoutException) {
+                    break
+                }
+                if (p.address.hostAddress != ip) continue
+                loc = Regex("(?im)^location:\\s*(\\S+)").find(String(p.data, 0, p.length))?.groupValues?.get(1)
+            }
+            loc
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    /** Endereço do controle de volume da TV (lido da descrição UPnP dela). */
+    private fun renderingControlUrl(ip: String): String? {
+        rcControl?.let { if (it.first == ip) return it.second }
+        // 1) Descrição padrão das Samsung (porta 9197).
+        val padrao = "http://$ip:9197/dmr"
+        val xml = httpGet(padrao)
+        if (xml != null) {
+            val url = parseControlUrl(padrao, xml) ?: "http://$ip:9197/upnp/control/RenderingControl1"
+            rcControl = ip to url
+            return url
+        }
+        // 2) Pergunta para a TV onde está a descrição (SSDP).
+        val loc = ssdpLocation(ip) ?: return null
+        val xml2 = httpGet(loc) ?: return null
+        val url = parseControlUrl(loc, xml2) ?: return null
+        rcControl = ip to url
+        return url
+    }
+
+    private fun soap(url: String, action: String, args: String): String {
+        val body = "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
+            "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" " +
+            "s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\"><s:Body>" +
+            "<u:$action xmlns:u=\"$RC_SERVICE\"><InstanceID>0</InstanceID><Channel>Master</Channel>$args</u:$action>" +
+            "</s:Body></s:Envelope>"
+        val req = Request.Builder().url(url)
+            .header("SOAPACTION", "\"$RC_SERVICE#$action\"")
+            .post(body.toRequestBody("text/xml; charset=utf-8".toMediaType()))
+            .build()
+        rest.newCall(req).execute().use { r ->
+            val text = r.body?.string().orEmpty()
+            if (!r.isSuccessful) throw TvException("A TV recusou o comando de volume ($action, HTTP ${r.code}).")
+            return text
+        }
+    }
+
+    /** Volume atual da TV (0 a 100) e se está no mudo. null se a TV não informou. */
+    suspend fun volume(c: Context): VolumeInfo? = withContext(Dispatchers.IO) {
+        val ip = Prefs.tvIp(c)
+        if (ip.isEmpty()) return@withContext null
+        val url = renderingControlUrl(ip) ?: return@withContext null
+        try {
+            val v = Regex("<CurrentVolume>(\\d+)</CurrentVolume>").find(soap(url, "GetVolume", ""))
+                ?.groupValues?.get(1)?.toInt() ?: return@withContext null
+            val m = try {
+                Regex("<CurrentMute>(\\w+)</CurrentMute>").find(soap(url, "GetMute", ""))
+                    ?.groupValues?.get(1)?.let { it == "1" || it.equals("true", true) }
+            } catch (_: Exception) {
+                null
+            }
+            VolumeInfo(v, m)
+        } catch (_: Exception) {
+            rcControl = null
+            null
+        }
+    }
+
+    private suspend fun upnpSet(c: Context, action: String, arg: String): Boolean = withContext(Dispatchers.IO) {
+        val url = renderingControlUrl(Prefs.tvIp(c)) ?: return@withContext false
+        try {
+            soap(url, action, arg)
+            true
+        } catch (_: Exception) {
+            rcControl = null
+            false
+        }
+    }
+
+    /** Segura uma tecla (como manter o dedo no botão do controle). */
+    private suspend fun holdKey(c: Context, key: String, ms: Long) {
+        fun cmd(kind: String) = JSONObject().put("method", "ms.remote.control").put("params", JSONObject()
+            .put("Cmd", kind).put("DataOfCmd", key).put("Option", "false").put("TypeOfRemote", "SendRemoteKey"))
+        send(c, cmd("Press"))
+        try {
+            delay(ms)
+        } finally {
+            send(c, cmd("Release"))
+        }
+    }
+
+    /** Coloca o volume num número exato. */
+    private suspend fun setVolume(c: Context, level: Int, before: VolumeInfo?): String {
+        val target = level.coerceIn(0, 100)
+        if (upnpSet(c, "SetVolume", "<DesiredVolume>$target</DesiredVolume>")) {
+            if (before?.muted == true) upnpSet(c, "SetMute", "<DesiredMute>0</DesiredMute>")
+            val now = volume(c)?.level ?: target
+            return "Volume da TV em $now."
+        }
+        // Sem o controle exato: zera segurando o botão e sobe contando.
+        holdKey(c, "KEY_VOLDOWN", 6000)
+        delay(400)
+        if (target > 0) keys(c, List(target) { "KEY_VOLUP" }, gapMs = 160)
+        return "Coloquei o volume da TV em mais ou menos $target (esta TV não informou o volume, então fui pelo botão)."
+    }
+
+    /** consultar, definir, aumentar, diminuir, mudo, tirar_mudo. */
+    suspend fun volumeAction(c: Context, action: String, amount: Int?): JSONObject {
+        val info = volume(c)
+        return when (action) {
+            "consultar" -> if (info != null) {
+                ok("O volume da TV está em ${info.level}" + (if (info.muted == true) ", no mudo" else "") + ".")
+                    .put("volume", info.level).put("mudo", info.muted == true)
+            } else {
+                fail(if (isOn(c)) "Esta TV não informou o volume." else "Não consegui falar com a TV. Ela está ligada?")
+            }
+            "definir" -> if (amount == null) fail("Diga um número de 0 a 100.") else ok(setVolume(c, amount, info))
+            "aumentar", "diminuir" -> {
+                val delta = (amount ?: 3).coerceIn(1, 50) * (if (action == "aumentar") 1 else -1)
+                if (info != null) {
+                    ok(setVolume(c, info.level + delta, info))
+                } else {
+                    val key = if (delta > 0) "KEY_VOLUP" else "KEY_VOLDOWN"
+                    val r = keysWithFallback(c, List(kotlin.math.abs(delta)) { key })
+                    ok(if (r == "ok") "Volume da TV ajustado." else r)
+                }
+            }
+            "mudo", "tirar_mudo" -> {
+                val wantMute = action == "mudo"
+                if (upnpSet(c, "SetMute", "<DesiredMute>${if (wantMute) 1 else 0}</DesiredMute>")) {
+                    ok(if (wantMute) "TV no mudo." else "Som da TV ligado.")
+                } else if (info?.muted == wantMute) {
+                    ok(if (wantMute) "A TV já está no mudo." else "O som da TV já está ligado.")
+                } else {
+                    val r = keysWithFallback(c, listOf("KEY_MUTE"))
+                    ok(if (r == "ok") "Apertei o mudo da TV." else r)
+                }
+            }
+            else -> fail("Ação de volume desconhecida: $action")
+        }
+    }
+
+    /** Qual app está aberto na tela da TV (YouTube, Netflix...). null se não deu para saber. */
+    suspend fun visibleApp(c: Context): String? = withContext(Dispatchers.IO) {
+        val ip = Prefs.tvIp(c)
+        if (ip.isEmpty()) return@withContext null
+        val candidates = (appsCache.ifEmpty { KNOWN_APPS }).take(40)
+        coroutineScope {
+            candidates.map { app ->
+                async {
+                    val j = httpGet("http://$ip:8001/api/v2/applications/${app.id}")?.let {
+                        try { JSONObject(it) } catch (_: Exception) { null }
+                    }
+                    if (j?.optBoolean("visible") == true) app.name else null
+                }
+            }.awaitAll().firstOrNull { it != null }
+        }
+    }
+
+    /** Toca um vídeo do YouTube na TV (protocolo DIAL, o mesmo do "transmitir"). */
+    suspend fun playYouTube(c: Context, videoId: String): Boolean = withContext(Dispatchers.IO) {
+        val ip = Prefs.tvIp(c)
+        val dial = try {
+            val req = Request.Builder().url("http://$ip:8080/ws/apps/YouTube")
+                .post("v=$videoId".toRequestBody("text/plain; charset=utf-8".toMediaType())).build()
+            rest.newCall(req).execute().use { it.code in 200..299 }
+        } catch (_: Exception) {
+            false
+        }
+        if (dial) return@withContext true
+        try {
+            send(c, emit("ed.apps.launch", JSONObject().put("appId", "111299001912")
+                .put("action_type", "DEEP_LINK").put("metaTag", "v=$videoId")))
+            true
+        } catch (_: Exception) {
+            false
         }
     }
 }

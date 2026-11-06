@@ -49,31 +49,58 @@ class Listener(context: Context) {
         return r
     }
 
-    /** Precisa ser chamado na thread principal. */
-    suspend fun listen(): Heard = withContext(Dispatchers.Main) {
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /**
+     * Escuta uma fala. [startTimeoutMs]: se a pessoa não começar a falar nesse tempo, desiste
+     * (assim a Navi não fica "pendurada" ouvindo a conversa da sala).
+     */
+    suspend fun listen(startTimeoutMs: Long = 7000L, maxMs: Long = 20_000L): Heard = withContext(Dispatchers.Main) {
         val r = create() ?: return@withContext Heard(null, SpeechRecognizer.ERROR_CLIENT)
         suspendCancellableCoroutine { cont ->
             var finished = false
+            var began = false
+            var lastPartial: String? = null
+            var noSpeech: Runnable? = null
+            var tooLong: Runnable? = null
             fun finish(h: Heard) {
                 if (finished) return
                 finished = true
+                noSpeech?.let { handler.removeCallbacks(it) }
+                tooLong?.let { handler.removeCallbacks(it) }
                 if (cont.isActive) cont.resume(h)
+            }
+            noSpeech = Runnable {
+                if (!began && !finished) {
+                    try { r.cancel() } catch (_: Exception) {}
+                    finish(Heard(null, SpeechRecognizer.ERROR_SPEECH_TIMEOUT))
+                }
+            }
+            tooLong = Runnable {
+                if (!finished) {
+                    try { r.cancel() } catch (_: Exception) {}
+                    finish(Heard(lastPartial, if (lastPartial == null) SpeechRecognizer.ERROR_SPEECH_TIMEOUT else null))
+                }
             }
             r.setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) {}
-                override fun onBeginningOfSpeech() {}
+                override fun onBeginningOfSpeech() { began = true }
                 override fun onRmsChanged(rmsdB: Float) {}
                 override fun onBufferReceived(buffer: ByteArray?) {}
                 override fun onEndOfSpeech() {}
                 override fun onEvent(eventType: Int, params: Bundle?) {}
-                override fun onError(error: Int) { finish(Heard(null, error)) }
+                override fun onError(error: Int) { finish(Heard(lastPartial, if (lastPartial == null) error else null)) }
                 override fun onResults(results: Bundle?) {
                     val list = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    finish(Heard(list?.firstOrNull()?.trim()))
+                    finish(Heard(list?.firstOrNull()?.trim()?.ifEmpty { null } ?: lastPartial))
                 }
                 override fun onPartialResults(partialResults: Bundle?) {
                     val list = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    list?.firstOrNull()?.takeIf { it.isNotBlank() }?.let { onPartial?.invoke(it) }
+                    list?.firstOrNull()?.takeIf { it.isNotBlank() }?.let {
+                        began = true
+                        lastPartial = it.trim()
+                        onPartial?.invoke(it)
+                    }
                 }
             })
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
@@ -83,13 +110,18 @@ class Listener(context: Context) {
                 .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
                 .putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, ctx.packageName)
-                .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
+                .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
+                .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 900L)
             try {
                 r.startListening(intent)
+                handler.postDelayed(noSpeech, startTimeoutMs)
+                handler.postDelayed(tooLong, maxMs)
             } catch (_: Exception) {
                 finish(Heard(null, SpeechRecognizer.ERROR_CLIENT))
             }
             cont.invokeOnCancellation {
+                noSpeech?.let { handler.removeCallbacks(it) }
+                tooLong?.let { handler.removeCallbacks(it) }
                 try { r.cancel() } catch (_: Exception) {}
             }
         }

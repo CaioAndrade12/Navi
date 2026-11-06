@@ -37,7 +37,7 @@
             <EditText android:id="@+id/userName" style="@style/Field"
                 android:hint="Seu nome" android:inputType="textPersonName" />
             <Switch android:id="@+id/followUp" style="@style/SwitchRow"
-                android:text="Continuar ouvindo depois de responder" />
+                android:text="Continuar ouvindo uns segundos depois de responder (ignora conversas que não são com a Navi)" />
             <Switch android:id="@+id/confirm" style="@style/SwitchRow"
                 android:text="Perguntar antes de mandar mensagens, ligar ou fechar programas" />
             <Button android:id="@+id/btnTestBrain" style="@style/BtnPrimary" android:text="Testar o cérebro" />
@@ -89,7 +89,7 @@
             </LinearLayout>
             <TextView android:id="@+id/pcInfo" style="@style/Hint" />
             <LinearLayout style="@style/Row">
-                <Button android:id="@+id/btnRefreshPc" style="@style/RowBtn" android:text="Atualizar ações" />
+                <Button android:id="@+id/btnRefreshPc" style="@style/RowBtn" android:text="Testar o PC" />
                 <Button android:id="@+id/btnUnpairPc" style="@style/RowBtn" android:text="Desparear" />
             </LinearLayout>
         </LinearLayout>
@@ -105,6 +105,35 @@
             <EditText android:id="@+id/emailPass" style="@style/Field"
                 android:hint="Senha de app (16 letras)" android:inputType="textPassword" />
             <Button android:id="@+id/btnTestEmail" style="@style/BtnSecondary" android:text="Testar Gmail" />
+        </LinearLayout>
+
+        <!-- ================= Música ================= -->
+        <LinearLayout style="@style/Card">
+            <TextView style="@style/CardTitle" android:text="🎵  Música no celular" />
+            <TextView style="@style/Hint"
+                android:text="App usado quando você diz &quot;Navi, toca...&quot; sem dizer onde. Para a Navi confirmar e controlar a música, libere o acesso às notificações." />
+            <RadioGroup android:id="@+id/musicApps" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:layout_marginTop="6dp" />
+        </LinearLayout>
+
+        <!-- ================= Sons e ativação ================= -->
+        <LinearLayout style="@style/Card">
+            <TextView style="@style/CardTitle" android:text="🔔  Sons e ativação" />
+            <TextView style="@style/Hint" android:text="Sensibilidade ao nome &quot;Navi&quot; (baixa = quase nunca ativa sem querer; fale &quot;Navi&quot;, espere o som e depois o pedido)" />
+            <RadioGroup android:id="@+id/wakeSens" android:layout_width="match_parent" android:layout_height="wrap_content">
+                <RadioButton android:id="@+id/sensLow" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="Baixa" android:textColor="@color/navi_text" />
+                <RadioButton android:id="@+id/sensNormal" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="Normal (recomendado)" android:textColor="@color/navi_text" />
+                <RadioButton android:id="@+id/sensHigh" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="Alta (responde mais rápido, ativa mais sem querer)" android:textColor="@color/navi_text" />
+            </RadioGroup>
+            <TextView style="@style/Hint" android:layout_marginTop="12dp" android:text="Som quando a Navi começa a ouvir" />
+            <RadioGroup android:id="@+id/startSound" android:layout_width="match_parent" android:layout_height="wrap_content" />
+            <Button android:id="@+id/btnPlayStart" style="@style/BtnSecondary" android:text="Ouvir som de início" />
+            <TextView style="@style/Hint" android:layout_marginTop="12dp" android:text="Som quando a Navi para de ouvir" />
+            <RadioGroup android:id="@+id/endSound" android:layout_width="match_parent" android:layout_height="wrap_content" />
+            <Button android:id="@+id/btnPlayEnd" style="@style/BtnSecondary" android:text="Ouvir som de encerramento" />
         </LinearLayout>
 
         <!-- ================= Permissões ================= -->

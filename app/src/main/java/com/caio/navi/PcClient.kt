@@ -131,18 +131,89 @@ object PcClient {
         cachedTools = null
     }
 
+    private fun runOnce(c: Context, name: String, args: JSONObject): JSONObject {
+        val bytes = JSONObject().put("name", name).put("args", args).toString().toByteArray()
+        val req = Request.Builder().url(base(c) + "/run").post(bytes.toRequestBody(JSON_TYPE))
+        signedHeaders(c, "POST", "/run", bytes).forEach { (k, v) -> req.header(k, v) }
+        return execute(req.build())
+    }
+
+    /**
+     * O PC mudou de IP (o roteador troca às vezes): procura o mesmo PC na rede.
+     * Só aceita se ele reconhecer a nossa chave (pedido assinado), então não cai em outro aparelho.
+     */
+    private suspend fun rediscover(c: Context): Boolean {
+        val old = Prefs.pcHost(c)
+        for (h in Lan.scan(PORT, 400)) {
+            val hp = "$h:$PORT"
+            if (hp == old || ping(hp) == null) continue
+            Prefs.setPcHost(c, hp)
+            val ok = try {
+                val req = Request.Builder().url("http://$hp/tools")
+                signedHeaders(c, "GET", "/tools", ByteArray(0)).forEach { (k, v) -> req.header(k, v) }
+                execute(req.build())
+                true
+            } catch (_: Exception) {
+                false
+            }
+            if (ok) return true
+            Prefs.setPcHost(c, old)
+        }
+        return false
+    }
+
     suspend fun run(c: Context, name: String, args: JSONObject): JSONObject = withContext(Dispatchers.IO) {
         try {
-            val bytes = JSONObject().put("name", name).put("args", args).toString().toByteArray()
-            val req = Request.Builder().url(base(c) + "/run").post(bytes.toRequestBody(JSON_TYPE))
-            signedHeaders(c, "POST", "/run", bytes).forEach { (k, v) -> req.header(k, v) }
-            execute(req.build())
+            val r = runOnce(c, name, args)
+            if (r.optString("erro").startsWith("Ação desconhecida")) {
+                // O NaviPC foi atualizado: aprende as ações novas e tenta de novo.
+                try { refreshTools(c) } catch (_: Exception) {}
+                runOnce(c, name, args)
+            } else {
+                r
+            }
         } catch (e: java.io.IOException) {
-            fail("O PC não respondeu. Ele está ligado, com o navi-pc aberto e no mesmo Wi-Fi? " +
-                "(pc_ligar pode ligá-lo se o Wake-on-LAN estiver ativo)")
+            if (rediscover(c)) {
+                try {
+                    return@withContext runOnce(c, name, args)
+                } catch (_: Exception) {
+                }
+            }
+            fail("O PC não respondeu. Ele está ligado, com o NaviPC aberto (ícone ✦ perto do relógio) e no mesmo Wi-Fi? " +
+                "Se estiver desligado, peça para eu ligar o PC.")
         } catch (e: IllegalStateException) {
             fail(e.message ?: "Erro no PC.")
         }
+    }
+
+    /** Teste completo para os ajustes: conexão, chave, ações e uma ação de verdade. */
+    suspend fun diagnose(c: Context): String = withContext(Dispatchers.IO) {
+        val host = Prefs.pcHost(c)
+        if (host.isEmpty() || Prefs.pcKey(c).isEmpty()) return@withContext "O PC ainda não foi pareado."
+        val sb = StringBuilder()
+        val info = ping(host) ?: if (rediscover(c)) ping(Prefs.pcHost(c)) else null
+        if (info == null) {
+            return@withContext "❌ Não achei o NaviPC em $host.\n\nConfira: o PC está ligado, o NaviPC está aberto " +
+                "(ícone ✦ perto do relógio) e os dois estão no mesmo Wi-Fi. No PC, use o ícone ✦ > " +
+                "'Corrigir rede/firewall' se a rede estiver como pública."
+        }
+        sb.append("✅ PC encontrado: ${info.optString("name")} (NaviPC ${info.optString("version")}) em ${Prefs.pcHost(c)}\n")
+        val n = try { refreshTools(c) } catch (e: Exception) {
+            return@withContext sb.append("❌ O PC recusou a chave: ${e.message}\nPareie de novo.").toString()
+        }
+        sb.append("✅ Chave aceita, $n ações disponíveis\n")
+        val st = run(c, "pc_status", JSONObject())
+        if (st.optString("status") == "ok") {
+            sb.append("✅ Ação de teste: CPU ${st.opt("cpu_porcentagem")}%, memória ${st.opt("memoria_porcentagem")}%")
+            if (st.has("volume")) sb.append(", volume ${st.opt("volume")}%")
+            sb.append("\n")
+        } else {
+            sb.append("❌ Ação de teste falhou: ${st.optString("erro")}\n")
+        }
+        if (info.optString("version") < "2.3") {
+            sb.append("\n⚠️ O NaviPC do computador está desatualizado. Baixe o NaviPC.exe novo e abra (substitua o antigo).")
+        }
+        sb.toString()
     }
 
     /** Ferramentas do PC, montadas a partir da lista que o agente informou. */

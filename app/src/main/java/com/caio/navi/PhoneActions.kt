@@ -13,6 +13,7 @@ import android.os.BatteryManager
 import android.provider.AlarmClock
 import android.provider.MediaStore
 import org.json.JSONObject
+import java.util.Calendar
 
 /** Ações no próprio celular. */
 object PhoneActions {
@@ -90,6 +91,23 @@ object PhoneActions {
             start(c, Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(query))))
             ok("Abri a busca de \"$query\" no YouTube.")
         }
+    }
+
+    /** Horário de um lembrete: daqui a X minutos, ou hora:minuto (de hoje, amanhã ou de uma data). */
+    fun reminderTime(minutes: Int, hour: Int, minute: Int, date: String): Long? {
+        if (minutes > 0) return System.currentTimeMillis() + minutes * 60_000L
+        if (hour !in 0..23) return null
+        val cal = Calendar.getInstance()
+        val d = Regex("(\\d{4})-(\\d{1,2})-(\\d{1,2})").find(date)
+        if (d != null) {
+            cal.set(d.groupValues[1].toInt(), d.groupValues[2].toInt() - 1, d.groupValues[3].toInt())
+        }
+        cal.set(Calendar.HOUR_OF_DAY, hour)
+        cal.set(Calendar.MINUTE, minute.coerceIn(0, 59))
+        cal.set(Calendar.SECOND, 0)
+        cal.set(Calendar.MILLISECOND, 0)
+        if (d == null && cal.timeInMillis <= System.currentTimeMillis()) cal.add(Calendar.DAY_OF_YEAR, 1)
+        return cal.timeInMillis
     }
 
     fun battery(c: Context): JSONObject {

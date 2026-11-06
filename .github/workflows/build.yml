@@ -103,7 +103,8 @@ jobs:
         working-directory: pc
         run: >
           pyinstaller --onefile --noconsole --name NaviPC
-          --hidden-import janelas --hidden-import audio_win --hidden-import pystray._win32
+          --hidden-import janelas --hidden-import audio_win --hidden-import jogos --hidden-import tela
+          --hidden-import monitor --hidden-import pystray._win32 --collect-submodules screen_brightness_control
           navi_pc.py
 
       - name: Autoteste do NaviPC.exe (o arquivo que vai para o PC)
