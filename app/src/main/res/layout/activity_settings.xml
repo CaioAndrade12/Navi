@@ -74,6 +74,8 @@
         <Button android:id="@+id/btnMic" style="@style/Btn" android:text="Microfone, notificações, contatos e ligações" />
         <Button android:id="@+id/btnNotifAccess" style="@style/Btn" android:text="Acesso às notificações (ler mensagens)" />
         <Button android:id="@+id/btnAccessibility" style="@style/Btn" android:text="Acessibilidade (enviar WhatsApp sozinha)" />
+        <TextView style="@style/Hint"
+            android:text="Se o Android disser que é uma configuração restrita: Configurações > Apps > Navi > ⋮ > Permitir configurações restritas." />
         <Button android:id="@+id/btnOverlay" style="@style/Btn" android:text="Sobrepor outros apps" />
         <Button android:id="@+id/btnBattery" style="@style/Btn" android:text="Tirar da economia de bateria" />
         <Button android:id="@+id/btnXiaomi" style="@style/Btn" android:text="Xiaomi: permissões extras (pop-up em 2º plano)" />

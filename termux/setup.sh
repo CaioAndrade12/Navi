@@ -95,6 +95,25 @@ nok() { amar  "  ! $1 (faça manualmente no app)"; }
 
 A shell pm grant $PKG android.permission.RECORD_AUDIO >/dev/null 2>&1 && ok "Microfone" || nok "Microfone"
 A shell pm grant $PKG android.permission.POST_NOTIFICATIONS >/dev/null 2>&1 && ok "Notificações" || nok "Notificações"
+A shell pm grant $PKG android.permission.READ_CONTACTS >/dev/null 2>&1 && ok "Contatos" || nok "Contatos"
+A shell pm grant $PKG android.permission.CALL_PHONE >/dev/null 2>&1 && ok "Ligações" || nok "Ligações"
+
+# Ler notificações (mensagens do WhatsApp, Instagram, Gmail)
+A shell cmd notification allow_listener "$PKG/$PKG.NaviNotificationService" >/dev/null 2>&1 \
+  && ok "Acesso às notificações" || nok "Acesso às notificações"
+
+# Acessibilidade (apertar "Enviar" no WhatsApp) — mantém os serviços que já estavam ligados
+SVC="$PKG/$PKG.NaviAccessibilityService"
+CUR=$(A shell settings get secure enabled_accessibility_services 2>/dev/null | tr -d '\r')
+if [ -z "$CUR" ] || [ "$CUR" = "null" ]; then NEW="$SVC"
+elif echo "$CUR" | grep -q "$SVC"; then NEW="$CUR"
+else NEW="$CUR:$SVC"; fi
+if A shell settings put secure enabled_accessibility_services "$NEW" >/dev/null 2>&1 \
+  && A shell settings put secure accessibility_enabled 1 >/dev/null 2>&1; then
+  ok "Acessibilidade"
+else
+  nok "Acessibilidade"
+fi
 A shell appops set $PKG SYSTEM_ALERT_WINDOW allow >/dev/null 2>&1 && ok "Sobrepor outros apps" || nok "Sobrepor outros apps"
 A shell dumpsys deviceidle whitelist +$PKG >/dev/null 2>&1 && ok "Sem restrição de bateria" || nok "Bateria"
 SH cmd appops set $PKG RUN_IN_BACKGROUND allow
@@ -112,12 +131,15 @@ echo
 verde "========================================"
 verde " Pronto! Agora, no app da Navi:"
 verde "========================================"
-echo " 1. Toque em 'Ligar a Navi'"
-echo "    (a 1ª vez demora uns segundos para preparar a voz)"
-echo " 2. Toque em 'Xiaomi: inicialização automática' e ative a Navi"
-echo " 3. Toque em 'Xiaomi: permissões extras' e ative"
-echo "    'Exibir janelas pop-up em segundo plano'"
-echo " 4. Diga 'Navi' e veja o Gemini abrir!"
+echo " 1. Toque em 'Ajustes' e cole sua chave grátis do Gemini"
+echo "    (botão 'Pegar chave grátis' abre o Google AI Studio)"
+echo " 2. Com a TV ligada, toque em 'Procurar TV' e depois 'Testar'"
+echo "    (aceite o pedido que aparece na tela da TV)"
+echo " 3. No PC, abra o NaviPC.exe (página de Releases do GitHub)"
+echo "    e pareie em 'Procurar PC' com o código que ele mostrar"
+echo " 4. Gmail (opcional): seu e-mail + uma senha de app do Google"
+echo " 5. Xiaomi: 'inicialização automática' e 'pop-up em 2º plano'"
+echo " 6. Volte, toque em 'Ligar' e diga: 'Navi, que horas são?'"
 echo
 amar "Pode desligar a Depuração sem fio agora, se quiser."
 amar "Para atualizar a Navi no futuro, é só rodar este script de novo."

@@ -202,7 +202,7 @@ class Brain(private val ctx: Context) {
     private fun requestBody(): JSONObject {
         val decls = JSONArray()
         for (t in Toolbox.all(ctx)) decls.put(t.declaration())
-        val gen = JSONObject().put("temperature", 0.7).put("maxOutputTokens", 2048)
+        val gen = JSONObject().put("temperature", 0.7).put("maxOutputTokens", 4096)
         if (!noThinkingConfig) gen.put("thinkingConfig", JSONObject().put("thinkingLevel", "low"))
         return JSONObject()
             .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", systemPrompt()))))

@@ -35,7 +35,7 @@ object Schema {
 
     fun str(desc: String, enum: List<String>? = null): JSONObject {
         val o = JSONObject().put("type", "string").put("description", desc)
-        if (enum != null) o.put("enum", JSONArray(enum))
+        if (enum != null) o.put("format", "enum").put("enum", JSONArray(enum))
         return o
     }
 

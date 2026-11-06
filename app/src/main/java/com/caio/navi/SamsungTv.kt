@@ -33,6 +33,7 @@ class TvException(message: String) : Exception(message)
  * WebSocket na porta 8002 (seguro, com token) ou 8001, e REST na 8001.
  * Na primeira conexão a TV mostra um pedido de permissão na tela: é só aceitar.
  */
+@SuppressLint("CustomX509TrustManager", "TrustAllX509TrustManager", "BadHostnameVerifier")
 object SamsungTv {
     private val NAME_B64 = Base64.encodeToString("Navi".toByteArray(), Base64.NO_WRAP)
 
@@ -66,7 +67,6 @@ object SamsungTv {
     private var appsCache: List<App> = emptyList()
 
     /** Cliente que aceita o certificado próprio da TV (só é usado para falar com a TV). */
-    @SuppressLint("CustomX509TrustManager", "TrustAllX509TrustManager", "BadHostnameVerifier")
     private val client: OkHttpClient by lazy {
         val trustAll = object : X509TrustManager {
             override fun checkClientTrusted(chain: Array<X509Certificate>?, authType: String?) {}

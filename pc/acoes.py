@@ -46,6 +46,7 @@ def tool(name, description, params=None, required=None, confirm=None, confirm_al
 def S(desc, enum=None):
     d = {"type": "string", "description": desc}
     if enum:
+        d["format"] = "enum"
         d["enum"] = enum
     return d
 
