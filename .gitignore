@@ -1,0 +1,9 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+app/src/main/assets/model-pt/
+model.zip
+model_tmp/
+Navi.apk

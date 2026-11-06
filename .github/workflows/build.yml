@@ -1,0 +1,54 @@
+name: Compilar APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Baixar modelo de voz em português (Vosk, offline)
+        run: |
+          curl -fL --retry 3 -o model.zip https://alphacephei.com/vosk/models/vosk-model-small-pt-0.3.zip
+          unzip -q model.zip -d model_tmp
+          mkdir -p app/src/main/assets
+          mv model_tmp/vosk-model-small-pt-0.3 app/src/main/assets/model-pt
+          echo "pt-0.3-${GITHUB_SHA}" > app/src/main/assets/model-pt/uuid
+          ls -la app/src/main/assets/model-pt
+
+      - name: Compilar
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      - name: Preparar APK
+        run: cp app/build/outputs/apk/release/app-release.apk Navi.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Navi
+          path: Navi.apk
+
+      - name: Publicar na release "apk" (link fixo)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete apk --yes --cleanup-tag || true
+          gh release create apk Navi.apk \
+            --title "Navi (build ${GITHUB_RUN_NUMBER})" \
+            --notes "Baixe o Navi.apk e instale, ou rode o script do Termux." \
+            --target "${GITHUB_SHA}" --latest

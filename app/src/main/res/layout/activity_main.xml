@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fitsSystemWindows="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Navi"
+            android:textSize="34sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:alpha="0.7"
+            android:text="Diga &quot;Navi&quot; e o Gemini abre para você dar o comando." />
+
+        <TextView
+            android:id="@+id/status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="#224FA3FF"
+            android:padding="14dp"
+            android:text="Desligada"
+            android:textSize="16sp" />
+
+        <Button
+            android:id="@+id/toggle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Ligar a Navi" />
+
+        <Button
+            android:id="@+id/test"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Testar: abrir o Gemini agora" />
+
+        <TextView
+            android:id="@+id/last"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:alpha="0.6"
+            android:textSize="13sp" />
+
+        <!-- Permissões -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="Permissões"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/perms"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:lineSpacingExtra="4dp" />
+
+        <Button
+            android:id="@+id/btnMic"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Permitir microfone e notificações" />
+
+        <Button
+            android:id="@+id/btnOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Permitir sobrepor outros apps" />
+
+        <Button
+            android:id="@+id/btnBattery"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Tirar da economia de bateria" />
+
+        <Button
+            android:id="@+id/btnXiaomi"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Xiaomi: permissões extras (pop-up em 2º plano)" />
+
+        <Button
+            android:id="@+id/btnAutostart"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Xiaomi: inicialização automática" />
+
+        <!-- Ajustes -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="Ajustes"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Palavras que ativam (separadas por vírgula)" />
+
+        <EditText
+            android:id="@+id/words"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="text" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Como abrir o Gemini" />
+
+        <RadioGroup
+            android:id="@+id/mode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <RadioButton
+                android:id="@+id/modeVoice"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Assistente padrão (recomendado)" />
+
+            <RadioButton
+                android:id="@+id/modeAssist"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Gesto de assistente" />
+
+            <RadioButton
+                android:id="@+id/modeGemini"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Abrir o app do Gemini" />
+        </RadioGroup>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Segundos de pausa depois de chamar (para o Gemini usar o microfone)" />
+
+        <EditText
+            android:id="@+id/pause"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="number" />
+
+        <CheckBox
+            android:id="@+id/vibrate"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Vibrar quando ouvir &quot;Navi&quot;" />
+
+        <Button
+            android:id="@+id/save"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Salvar ajustes" />
+    </LinearLayout>
+</ScrollView>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Brilho de quatro pontas (ícone do app e da notificação) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,26 C56,44 64,52 82,54 C64,56 56,64 54,82 C52,64 44,56 26,54 C44,52 52,44 54,26 Z" />
+    <path
+        android:fillColor="#9FD0FF"
+        android:pathData="M74,30 C74.8,35 77,37.2 82,38 C77,38.8 74.8,41 74,46 C73.2,41 71,38.8 66,38 C71,37.2 73.2,35 74,30 Z" />
+</vector>
