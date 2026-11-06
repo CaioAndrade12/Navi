@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -19,7 +21,7 @@ android {
 
     // Chave de assinatura fixa, para que cada nova versão instale por cima da anterior.
     // Os dados ficam em app/signing.properties (só no repositório privado).
-    val signing = java.util.Properties().apply {
+    val signing = Properties().apply {
         val f = file("signing.properties")
         if (f.exists()) f.inputStream().use { load(it) }
     }
