@@ -233,7 +233,7 @@ object Llm {
                 .put("model", model)
                 .put("messages", toMessages(system, recent, b.id))
                 .put("temperature", 0.6)
-                .put("max_tokens", 2048)
+                .put(maxTokensField(b.id), 2048)
             if (chosen.length() > 0) body.put("tools", chosen).put("tool_choice", "auto")
             if (model.contains("gpt-oss") && (b.id == "groq" || b.id == "cerebras")) body.put("reasoning_effort", "low")
             return fromOpenAi(post("${b.base}/chat/completions", b.key, body))
@@ -245,6 +245,10 @@ object Llm {
             if (e.code == 400 && e.message.orEmpty().contains("tool", true)) request(allTools = true) else throw e
         }
     }
+
+    /** Groq e Cerebras usam o nome novo; OpenRouter e Mistral, o antigo. */
+    private fun maxTokensField(provider: String) =
+        if (provider == "groq" || provider == "cerebras") "max_completion_tokens" else "max_tokens"
 
     private fun post(url: String, key: String, body: JSONObject): JSONObject {
         val req = Request.Builder()
@@ -636,7 +640,7 @@ object Llm {
             val model = b.models.first()
             val t0 = System.currentTimeMillis()
             lines += try {
-                val body = JSONObject().put("model", model).put("max_tokens", 300)
+                val body = JSONObject().put("model", model).put(maxTokensField(b.id), 300)
                     .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", ask)))
                 if (model.contains("gpt-oss") && (b.id == "groq" || b.id == "cerebras")) body.put("reasoning_effort", "low")
                 post("${b.base}/chat/completions", b.key, body)
