@@ -148,17 +148,19 @@ object Llm {
     // ------------------------------------------------------------------ conversa
 
     /** Responde no formato do Gemini (candidates/content/parts), venha a resposta de quem vier. */
-    fun chat(c: Context, system: String, history: MutableList<JSONObject>, tools: List<Tool>): JSONObject {
+    fun chat(
+        c: Context, system: String, history: MutableList<JSONObject>, tools: List<Tool>, thinking: String = "low",
+    ): JSONObject {
         val backups = backups(c)
         val geminiKey = Prefs.geminiKey(c)
         val slots = mutableListOf<Pair<String, () -> JSONObject>>()
         if (geminiKey.isNotEmpty()) {
             for (model in listOf(Prefs.geminiModel(c), Prefs.FALLBACK_MODEL).distinct()) {
-                slots += "gemini:$model" to { geminiChat(geminiKey, model, system, history, tools, backups.isNotEmpty()) }
+                slots += "gemini:$model" to { geminiChat(geminiKey, model, system, history, tools, backups.isNotEmpty(), thinking) }
             }
         }
         for (b in backups) for (model in b.models) {
-            slots += "${b.id}:$model" to { openAiChat(c, b, model, system, history, tools) }
+            slots += "${b.id}:$model" to { openAiChat(c, b, model, system, history, tools, thinking) }
         }
         if (slots.isEmpty()) throw GeminiException("Falta a chave da Gemini API nos ajustes.", 401)
 
@@ -199,12 +201,13 @@ object Llm {
 
     private fun geminiChat(
         key: String, model: String, system: String, history: List<JSONObject>, tools: List<Tool>, quickTimeout: Boolean,
+        thinking: String,
     ): JSONObject {
         fun body(): JSONObject {
             val decls = JSONArray()
-            for (t in tools) decls.put(t.declaration())
+            for (t in tools) decls.put(compact(t.declaration(), keepGeminiFormat = true))
             val gen = JSONObject().put("temperature", 0.7).put("maxOutputTokens", 4096)
-            if (!noThinking) gen.put("thinkingConfig", JSONObject().put("thinkingLevel", "low"))
+            if (!noThinking) gen.put("thinkingConfig", JSONObject().put("thinkingLevel", thinking))
             return JSONObject()
                 .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
                 .put("contents", JSONArray(history))
@@ -224,26 +227,22 @@ object Llm {
 
     private fun openAiChat(
         c: Context, b: Backup, model: String, system: String, history: MutableList<JSONObject>, tools: List<Tool>,
+        thinking: String,
     ): JSONObject {
         transcribeAudioParts(c, history)
         val recent = history.subList(backupStart(history), history.size)
-        fun request(allTools: Boolean): JSONObject {
-            val chosen = chooseTools(recent, tools, allTools)
-            val body = JSONObject()
-                .put("model", model)
-                .put("messages", toMessages(system, recent, b.id))
-                .put("temperature", 0.6)
-                .put(maxTokensField(b.id), 2048)
-            if (chosen.length() > 0) body.put("tools", chosen).put("tool_choice", "auto")
-            if (model.contains("gpt-oss") && (b.id == "groq" || b.id == "cerebras")) body.put("reasoning_effort", "low")
-            return fromOpenAi(post("${b.base}/chat/completions", b.key, body))
+        val decls = JSONArray()
+        for (tool in tools) decls.put(JSONObject().put("type", "function").put("function", compact(tool.declaration(), false)))
+        val body = JSONObject()
+            .put("model", model)
+            .put("messages", toMessages(system, recent, b.id))
+            .put("temperature", 0.6)
+            .put(maxTokensField(b.id), 2048)
+        if (decls.length() > 0) body.put("tools", decls).put("tool_choice", "auto")
+        if (model.contains("gpt-oss") && (b.id == "groq" || b.id == "cerebras")) {
+            body.put("reasoning_effort", if (thinking == "medium") "medium" else "low")
         }
-        return try {
-            request(allTools = false)
-        } catch (e: GeminiException) {
-            // O modelo quis uma ferramenta que ficou de fora da lista reduzida: manda a lista inteira.
-            if (e.code == 400 && e.message.orEmpty().contains("tool", true)) request(allTools = true) else throw e
-        }
+        return fromOpenAi(post("${b.base}/chat/completions", b.key, body))
     }
 
     /** Groq e Cerebras usam o nome novo; OpenRouter e Mistral, o antigo. */
@@ -394,57 +393,7 @@ object Llm {
             .put("finishReason", reason)))
     }
 
-    // ------------------------------------------------------------------ ferramentas mais leves para os reservas
-
-    /** Grupo de ferramentas -> palavras (sem acento) que indicam que ele pode ser útil. */
-    private val GROUPS: List<Pair<(String) -> Boolean, Regex>> = listOf(
-        { n: String -> n.startsWith("tv_") } to
-            Regex("\\b(tv|televisao|netflix|globoplay|prime|disney|hbo|max|hdmi|canal|canais|smart)\\b"),
-        { n: String -> n.startsWith("pc_") } to
-            Regex("\\b(pc|computador|notebook|windows|steam|epic|jogo|jogos|game|games|monitor|resolucao|navegador|chrome|edge|firefox|discord|site|sites|link|programa|programas|janela|janelas|desktop|print|fone|headset|caixa|microfone|abre|abrir|abra|fecha|fechar)\\b"),
-        { n: String -> n.startsWith("mensage") || n == "whatsapp_enviar" || n.startsWith("email_") } to
-            Regex("\\b(mensage\\w*|msg|whats\\w*|zap|wpp|email|emails|gmail|insta\\w*|direct|dm|manda|mande|mandar|envia|envie|enviar|responde|responda|responder|escreve|notifica\\w*|recado|leia|ler|le)\\b"),
-        { n: String -> n in setOf("celular_tocar_musica", "celular_midia", "celular_tocando", "celular_volume") } to
-            Regex("\\b(toca|tocar|toque|musica|musicas|som|spotify|deezer|pausa|pause|pausar|continua|continuar|proxima|anterior|volume|playlist|album|banda|cantor\\w*|ouvir|tocando|podcast)\\b"),
-        { n: String -> n == "celular_alarme" || n == "celular_timer" || n.startsWith("lembrete_") } to
-            Regex("\\b(alarme|despert\\w*|timer|temporizador|cronometro|lembr\\w*|avisa|avise|minutos?|horas?|amanha|agenda|daqui)\\b"),
-        { n: String -> n in setOf("celular_ligar_para", "celular_abrir_app", "celular_lanterna", "celular_bateria") } to
-            Regex("\\b(liga|ligar|ligacao|telefon\\w*|chama|abre|abrir|abra|lanterna|bateria|celular|app|aplicativo)\\b"),
-    )
-    private val ALWAYS = setOf("pesquisar_web", "memoria_salvar", "memoria_apagar")
-
-    /**
-     * O plano grátis do Groq aceita poucos "tokens" por minuto, e a lista inteira de ferramentas já
-     * ocupa quase tudo. Então os reservas recebem só os grupos que combinam com o assunto.
-     */
-    private fun chooseTools(recent: List<JSONObject>, tools: List<Tool>, all: Boolean): JSONArray {
-        val chosen = if (all) tools else {
-            val texts = StringBuilder()
-            val used = mutableSetOf<String>()
-            var userTurns = 0
-            for (c in recent.asReversed()) {
-                val parts = c.optJSONArray("parts") ?: continue
-                for (j in 0 until parts.length()) {
-                    val p = parts.optJSONObject(j) ?: continue
-                    p.optJSONObject("functionCall")?.let { used += it.optString("name") }
-                    if (p.has("text") && userTurns < 2) texts.append(' ').append(p.optString("text"))
-                }
-                if (c.optString("role") == "user" && parts.optJSONObject(0)?.has("functionResponse") == false) userTurns++
-            }
-            val t = Brain.normalize(texts.toString().replace(Brain.FOLLOW_UP_NOTE, " "))
-            val groups = GROUPS.filter { (_, words) -> words.containsMatchIn(t) }.map { it.first }.toMutableList()
-            for ((inGroup, _) in GROUPS) if (used.any(inGroup) && inGroup !in groups) groups += inGroup
-            if (groups.isEmpty()) {
-                // Assunto geral: tudo do celular, sem os grupos grandes (TV e PC).
-                tools.filter { !it.name.startsWith("pc_") && !it.name.startsWith("tv_") }
-            } else {
-                tools.filter { tool -> tool.name in ALWAYS || groups.any { it(tool.name) } }
-            }
-        }
-        val out = JSONArray()
-        for (tool in chosen) out.put(JSONObject().put("type", "function").put("function", compact(tool.declaration())))
-        return out
-    }
+    // ------------------------------------------------------------------ declarações enxutas
 
     private fun shortText(s: String, max: Int): String {
         if (s.length <= max) return s
@@ -452,24 +401,25 @@ object Llm {
         return if (cut > max / 2) s.substring(0, cut + 1) else s.substring(0, max).trimEnd() + "…"
     }
 
-    private fun compact(d: JSONObject): JSONObject {
+    /** Descrição curta e parâmetros com descrições curtas: o mesmo sentido com bem menos tokens. */
+    private fun compact(d: JSONObject, keepGeminiFormat: Boolean): JSONObject {
         val params = d.optJSONObject("parameters")
-        return JSONObject()
-            .put("name", d.optString("name"))
-            .put("description", shortText(d.optString("description"), 220))
-            .put("parameters", if (params != null) cleanSchema(params)
-            else JSONObject().put("type", "object").put("properties", JSONObject()))
+        val out = JSONObject().put("name", d.optString("name"))
+            .put("description", shortText(d.optString("description"), 200))
+        if (params != null) out.put("parameters", cleanSchema(params, keepGeminiFormat))
+        else if (!keepGeminiFormat) out.put("parameters", JSONObject().put("type", "object").put("properties", JSONObject()))
+        return out
     }
 
-    /** Tira o que é só do Gemini ("format": "enum") e encurta as descrições. */
-    private fun cleanSchema(s: JSONObject): JSONObject {
+    /** Encurta as descrições; para os reservas também tira o que é só do Gemini ("format": "enum"). */
+    private fun cleanSchema(s: JSONObject, keepGeminiFormat: Boolean): JSONObject {
         val o = JSONObject()
         for (k in s.keys()) {
             val v = s.get(k)
             when {
-                k == "format" && v == "enum" -> Unit
-                k == "description" && v is String -> o.put(k, shortText(v, 100))
-                v is JSONObject -> o.put(k, cleanSchema(v))
+                k == "format" && v == "enum" && !keepGeminiFormat -> Unit
+                k == "description" && v is String -> o.put(k, shortText(v, 90))
+                v is JSONObject -> o.put(k, cleanSchema(v, keepGeminiFormat))
                 else -> o.put(k, v)
             }
         }
@@ -478,8 +428,16 @@ object Llm {
 
     // ------------------------------------------------------------------ áudio
 
-    /** Transcreve uma fala (Gemini primeiro, depois o Whisper do Groq). null = ninguém conseguiu. */
+    /** Transcreve uma fala (Whisper do Groq, rápido e grátis; senão o Gemini). null = ninguém conseguiu. */
     fun transcribe(c: Context, wav: ByteArray): String? {
+        val groqKey = Prefs.providerKey(c, "groq")
+        if (groqKey.isNotEmpty() && !paused("groq:whisper")) {
+            try {
+                return whisper(groqKey, wav)
+            } catch (e: GeminiException) {
+                pause("groq:whisper", e)
+            }
+        }
         val key = Prefs.geminiKey(c)
         if (key.isNotEmpty()) {
             for (model in listOf(Prefs.geminiModel(c), Prefs.FALLBACK_MODEL).distinct()) {
@@ -491,14 +449,6 @@ object Llm {
                     pause(slot, e)
                     if (e.code == 400) break
                 }
-            }
-        }
-        val groq = Prefs.providerKey(c, "groq")
-        if (groq.isNotEmpty() && !paused("groq:whisper")) {
-            try {
-                return whisper(groq, wav)
-            } catch (e: GeminiException) {
-                pause("groq:whisper", e)
             }
         }
         return null

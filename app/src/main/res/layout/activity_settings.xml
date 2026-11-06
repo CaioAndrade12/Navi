@@ -37,7 +37,7 @@
             <EditText android:id="@+id/userName" style="@style/Field"
                 android:hint="Seu nome" android:inputType="textPersonName" />
             <Switch android:id="@+id/followUp" style="@style/SwitchRow"
-                android:text="Continuar ouvindo uns segundos depois de responder (ignora conversas que não são com a Navi)" />
+                android:text="Conversa contínua: depois de responder, continua ouvindo sem precisar dizer &quot;Navi&quot; de novo (ignora conversas que não são com ela)" />
             <Switch android:id="@+id/confirm" style="@style/SwitchRow"
                 android:text="Perguntar antes de mandar mensagens, ligar ou fechar programas" />
             <Button android:id="@+id/btnTestBrain" style="@style/BtnPrimary" android:text="Testar o cérebro" />
@@ -139,7 +139,7 @@
         <!-- ================= Sons e ativação ================= -->
         <LinearLayout style="@style/Card">
             <TextView style="@style/CardTitle" android:text="🔔  Sons e ativação" />
-            <TextView style="@style/Hint" android:text="Sensibilidade ao nome &quot;Navi&quot; (baixa = quase nunca ativa sem querer; fale &quot;Navi&quot;, espere o som e depois o pedido)" />
+            <TextView style="@style/Hint" android:text="Sensibilidade ao nome &quot;Navi&quot;. Pode falar o pedido junto: &quot;Navi, liga a TV&quot;. Se ela ativar sozinha, use Baixa; se não te ouvir, use Alta." />
             <RadioGroup android:id="@+id/wakeSens" android:layout_width="match_parent" android:layout_height="wrap_content">
                 <RadioButton android:id="@+id/sensLow" android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:text="Baixa" android:textColor="@color/navi_text" />
@@ -148,6 +148,9 @@
                 <RadioButton android:id="@+id/sensHigh" android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:text="Alta (responde mais rápido, ativa mais sem querer)" android:textColor="@color/navi_text" />
             </RadioGroup>
+            <TextView style="@style/Hint" android:layout_marginTop="12dp" android:text="Volume dos sons" />
+            <RadioGroup android:id="@+id/soundVolume" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:orientation="horizontal" />
             <TextView style="@style/Hint" android:layout_marginTop="12dp" android:text="Som quando a Navi começa a ouvir" />
             <RadioGroup android:id="@+id/startSound" android:layout_width="match_parent" android:layout_height="wrap_content" />
             <Button android:id="@+id/btnPlayStart" style="@style/BtnSecondary" android:text="Ouvir som de início" />
@@ -162,7 +165,11 @@
             <TextView android:id="@+id/perms" style="@style/Hint" android:lineSpacingExtra="6dp" android:textSize="14sp" />
             <Button android:id="@+id/btnMic" style="@style/BtnSecondary" android:text="Microfone, notificações, contatos e ligações" />
             <Button android:id="@+id/btnNotifAccess" style="@style/BtnSecondary" android:text="Acesso às notificações (ler mensagens)" />
-            <Button android:id="@+id/btnAccessibility" style="@style/BtnSecondary" android:text="Acessibilidade (enviar WhatsApp sozinha)" />
+            <Button android:id="@+id/btnAccessibility" style="@style/BtnSecondary" android:text="Acessibilidade (WhatsApp, travar tela, print)" />
+            <LinearLayout style="@style/Row">
+                <Button android:id="@+id/btnWriteSettings" style="@style/RowBtn" android:text="Brilho do celular" />
+                <Button android:id="@+id/btnDnd" style="@style/RowBtn" android:text="Não perturbe" />
+            </LinearLayout>
             <TextView style="@style/Hint"
                 android:text="Se o Android disser que é uma configuração restrita: Configurações > Apps > Navi > ⋮ > Permitir configurações restritas." />
             <Button android:id="@+id/btnOverlay" style="@style/BtnSecondary" android:text="Sobrepor outros apps" />

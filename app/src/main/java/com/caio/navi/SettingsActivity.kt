@@ -69,6 +69,8 @@ class SettingsActivity : Activity() {
         btn(R.id.btnNotifAccess) { open(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
         btn(R.id.btnAccessibility) { open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
         btn(R.id.btnOverlay) { open(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))) }
+        btn(R.id.btnWriteSettings) { open(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:$packageName"))) }
+        btn(R.id.btnDnd) { open(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
         btn(R.id.btnBattery) {
             open(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
         }
@@ -197,6 +199,7 @@ class SettingsActivity : Activity() {
         findViewById<android.widget.TextView>(R.id.brainsInfo).text = Llm.status()
         findViewById<RadioGroup>(R.id.wakeSens).check(
             when (Prefs.wakeSensitivity(this)) { 0 -> R.id.sensLow; 2 -> R.id.sensHigh; else -> R.id.sensNormal })
+        fillRadios(R.id.soundVolume, Sounds.VOLUME_OPTIONS, Prefs.soundVolume(this).toString())
         fillRadios(R.id.startSound, Sounds.START_OPTIONS, Prefs.startSound(this))
         fillRadios(R.id.endSound, Sounds.END_OPTIONS, Prefs.endSound(this))
     }
@@ -256,6 +259,7 @@ class SettingsActivity : Activity() {
             R.id.sensHigh -> 2
             else -> 1
         })
+        checkedKey(R.id.soundVolume)?.toIntOrNull()?.let { Prefs.setSoundVolume(this, it) }
         checkedKey(R.id.startSound)?.let { Prefs.setStartSound(this, it) }
         checkedKey(R.id.endSound)?.let { Prefs.setEndSound(this, it) }
         if (NaviService.running && oldWords != Prefs.wordsRaw(this)) NaviService.start(this) // reaplica as palavras
@@ -384,7 +388,9 @@ class SettingsActivity : Activity() {
             appendLine("${mark(granted(Manifest.permission.READ_CONTACTS))}  Contatos (mandar mensagem pelo nome)")
             appendLine("${mark(granted(Manifest.permission.CALL_PHONE))}  Ligações")
             appendLine("${mark(NaviNotificationService.isEnabled(this@SettingsActivity))}  Acesso às notificações (ler mensagens)")
-            appendLine("${mark(NaviAccessibilityService.isEnabled(this@SettingsActivity))}  Acessibilidade (enviar WhatsApp)")
+            appendLine("${mark(NaviAccessibilityService.isEnabled(this@SettingsActivity))}  Acessibilidade (enviar WhatsApp, travar tela, print)")
+            appendLine("${mark(Settings.System.canWrite(this@SettingsActivity))}  Alterar configurações (brilho do celular)")
+            appendLine("${mark(getSystemService(android.app.NotificationManager::class.java).isNotificationPolicyAccessGranted)}  Não perturbe (modo silencioso)")
             appendLine("${mark(Settings.canDrawOverlays(this@SettingsActivity))}  Sobrepor outros apps")
             appendLine("${mark(pm.isIgnoringBatteryOptimizations(packageName))}  Sem restrição de bateria")
             append("${mark(IrRemote.available(this@SettingsActivity))}  Infravermelho do celular")

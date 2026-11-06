@@ -146,6 +146,8 @@ else
   nok "Acessibilidade"
 fi
 A shell appops set $PKG SYSTEM_ALERT_WINDOW allow >/dev/null 2>&1 && ok "Sobrepor outros apps" || nok "Sobrepor outros apps"
+A shell appops set $PKG WRITE_SETTINGS allow >/dev/null 2>&1 && ok "Brilho do celular" || nok "Brilho do celular"
+A shell cmd notification allow_dnd $PKG >/dev/null 2>&1 && ok "Não perturbe" || nok "Não perturbe"
 A shell dumpsys deviceidle whitelist +$PKG >/dev/null 2>&1 && ok "Sem restrição de bateria" || nok "Bateria"
 SH cmd appops set $PKG RUN_IN_BACKGROUND allow
 SH cmd appops set $PKG RUN_ANY_IN_BACKGROUND allow

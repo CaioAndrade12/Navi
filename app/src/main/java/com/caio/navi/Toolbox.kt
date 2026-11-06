@@ -113,7 +113,8 @@ object Toolbox {
                 how = if (how.isEmpty()) "pelo infravermelho" else "$how e pelo infravermelho"
             }
             if (how.isEmpty()) fail("Não consegui falar com a TV.")
-            else ok("Comando $key enviado $how. Se a TV não trocou, use o menu de fontes (tv_teclas com fonte, direita/esquerda e ok).")
+            else ok(if (key == "KEY_SOURCE") "Abri o menu de fontes da TV." else "Mudei a TV para ${e.replace("HDMI", "HDMI ")}.")
+                .put("dica", "Se não trocou, use tv_teclas: fonte, direita/esquerda e ok.")
         },
         Tool("tv_teclas", "Aperta teclas do controle da TV em sequência. Nomes aceitos: home, voltar, ok, cima, baixo, " +
             "esquerda, direita, play, pause, parar, avancar, retroceder, menu, sair, fonte, info, guia, mudo, volume_mais, " +
@@ -124,7 +125,17 @@ object Toolbox {
             val keys = (0 until arr.length()).map { tvKey(arr.getString(it)) }.take(40)
             if (keys.isEmpty()) fail("Nenhuma tecla informada.") else {
                 val r = SamsungTv.keysWithFallback(c, keys)
-                ok(if (r == "ok") "Teclas enviadas: ${keys.joinToString()}." else r)
+                if (r == "ok") ok("Pronto.").put("teclas_enviadas", keys.joinToString()) else ok(r)
+            }
+        },
+        Tool("tv_canal", "Muda a TV para um canal pelo número (TV aberta, cabo ou app de canais aberto).",
+            obj("numero" to int("número do canal"), required = listOf("numero"))
+        ) { a ->
+            val n = a.optInt("numero", -1)
+            if (n < 0) fail("Qual canal?") else {
+                val keys = n.toString().map { "KEY_$it" } + "KEY_ENTER"
+                val r = SamsungTv.keysWithFallback(c, keys)
+                ok(if (r == "ok") "Canal $n." else "Canal $n (pelo infravermelho).")
             }
         },
         Tool("tv_digitar", "Digita um texto no teclado aberto na TV (ex.: na busca do YouTube) e confirma.",
@@ -308,9 +319,42 @@ object Toolbox {
                 else "Para eu ver o que está tocando, libere o acesso às notificações nos Ajustes da Navi.")
         },
         Tool("celular_bateria", "Informa a bateria do celular.") { _ -> PhoneActions.battery(c) },
-        Tool("celular_volume", "Ajusta o volume de mídia do celular (0 a 100).",
-            obj("nivel" to int("0 a 100"), required = listOf("nivel"))
-        ) { a -> PhoneActions.mediaVolume(c, a.optInt("nivel", 50)) },
+        Tool("celular_volume", "Consulta ou muda o volume do celular (mídia, toque ou alarme).",
+            obj(
+                "acao" to str("o que fazer", listOf("consultar", "definir", "aumentar", "diminuir", "mudo")),
+                "nivel" to int("para definir: 0 a 100; para aumentar/diminuir: quantos pontos"),
+                "tipo" to str("qual volume (padrão mídia)", listOf("midia", "toque", "alarme")),
+            )
+        ) { a ->
+            val acao = a.s("acao").ifEmpty { if (a.has("nivel")) "definir" else "consultar" }
+            PhoneActions.volume(c, acao, if (a.has("nivel")) a.optInt("nivel") else null, a.s("tipo"))
+        },
+        Tool("celular_brilho", "Consulta ou muda o brilho da tela do celular, ou liga o brilho automático.",
+            obj(
+                "acao" to str("o que fazer", listOf("consultar", "definir", "aumentar", "diminuir", "automatico")),
+                "nivel" to int("0 a 100 (para definir) ou quantos pontos (aumentar/diminuir)"),
+                required = listOf("acao"),
+            )
+        ) { a -> PhoneActions.brightness(c, a.s("acao"), if (a.has("nivel")) a.optInt("nivel") else null) },
+        Tool("celular_modo_som", "Põe o celular no normal, vibrar, silencioso ou Não perturbe.",
+            obj("modo" to str("modo", listOf("normal", "vibrar", "silencioso", "nao_perturbe")), required = listOf("modo"))
+        ) { a -> PhoneActions.ringerMode(c, a.s("modo")) },
+        Tool("celular_tela", "Mexe na tela do celular: bloquear, tirar print, ir para o início, voltar, apps recentes, " +
+            "abrir notificações ou ajustes rápidos.",
+            obj("acao" to str("ação", listOf("bloquear", "print", "inicio", "voltar", "recentes", "notificacoes",
+                "ajustes_rapidos")), required = listOf("acao"))
+        ) { a -> main { PhoneActions.screen(c, a.s("acao")) } },
+        Tool("celular_navegar", "Abre a rota no Google Maps até um lugar (endereço, nome do lugar ou \"casa\").",
+            obj("destino" to str("para onde"), "modo" to str("como ir (padrão carro)", listOf("carro", "a_pe", "bicicleta", "transporte")),
+                required = listOf("destino"))
+        ) { a -> main { PhoneActions.navigate(c, a.s("destino"), a.s("modo")) } },
+        Tool("celular_ajustes", "Abre uma tela de ajustes do celular (Wi-Fi, Bluetooth, som, tela, bateria, apps...). " +
+            "Wi-Fi e Bluetooth o Android só deixa ligar/desligar por essas telas.",
+            obj("pagina" to str("qual tela", PhoneActions.SETTINGS_KEYS), required = listOf("pagina"))
+        ) { a -> main { PhoneActions.openSettings(c, a.s("pagina")) } },
+        Tool("celular_camera", "Abre a câmera do celular (foto, selfie ou vídeo).",
+            obj("video" to bool("gravar vídeo"), "selfie" to bool("câmera da frente"))
+        ) { a -> main { PhoneActions.camera(c, a.optBoolean("video"), a.optBoolean("selfie")) } },
 
         // ---------------- Conhecimento e memória ----------------
         Tool("pesquisar_web", "Pesquisa na internet (Google) para responder sobre fatos atuais: notícias, clima, preços, placares, horários, lançamentos.",

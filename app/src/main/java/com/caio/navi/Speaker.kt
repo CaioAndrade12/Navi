@@ -52,7 +52,7 @@ class Speaker(context: Context) {
             tts.setLanguage(Locale("pt"))
         }
         tts.setAudioAttributes(attrs)
-        tts.setSpeechRate(1.05f)
+        tts.setSpeechRate(1.12f)
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {}
             override fun onDone(utteranceId: String?) { finish(utteranceId) }
@@ -68,8 +68,8 @@ class Speaker(context: Context) {
         if (id != null) done.remove(id)?.complete(Unit)
     }
 
-    /** Fala o texto e só volta quando terminar (ou se for interrompida). */
-    suspend fun speak(text: String) {
+    /** Fala o texto e só volta quando terminar (ou se for interrompida). [volume]: 0 a 1. */
+    suspend fun speak(text: String, volume: Float = 1f) {
         val clean = text.trim().take(3500)
         if (clean.isEmpty()) return
         if (withTimeoutOrNull(6000) { ready.await() } != true) return
@@ -78,7 +78,10 @@ class Speaker(context: Context) {
         done[id] = d
         try { audio?.requestAudioFocus(focus) } catch (_: Exception) {}
         try {
-            tts.speak(clean, TextToSpeech.QUEUE_FLUSH, null, id)
+            val params = if (volume < 1f) android.os.Bundle().apply {
+                putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, volume.coerceIn(0f, 1f))
+            } else null
+            tts.speak(clean, TextToSpeech.QUEUE_FLUSH, params, id)
             // Tempo máximo generoso: ~80 ms por caractere + folga.
             withTimeoutOrNull(5000L + clean.length * 80L) { d.await() }
         } finally {

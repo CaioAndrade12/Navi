@@ -110,8 +110,8 @@ class Listener(context: Context) {
                 .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
                 .putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, ctx.packageName)
-                .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
-                .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 900L)
+                .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 850L)
+                .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 650L)
             try {
                 r.startListening(intent)
                 handler.postDelayed(noSpeech, startTimeoutMs)
@@ -194,7 +194,7 @@ object VoiceRecorder {
                 } else {
                     write(pcm, chunk)
                     quiet = if (rms < threshold * 0.8) quiet + 1 else 0
-                    if (quiet >= 45 || frames * 20 > maxMs) break // 900 ms de silêncio
+                    if (quiet >= 38 || frames * 20 > maxMs) break // 760 ms de silêncio
                 }
             }
         } catch (_: Exception) {

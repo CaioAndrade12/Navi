@@ -91,8 +91,8 @@ object Prefs {
      * Depois de responder, continua ouvindo por alguns segundos sem precisar dizer "Navi"
      * (ignorando falas que não forem com ela). Desligado: só continua quando a Navi pergunta algo.
      */
-    fun followUp(c: Context) = bool(c, "follow_up2", false)
-    fun setFollowUp(c: Context, v: Boolean) = putBool(c, "follow_up2", v)
+    fun followUp(c: Context) = bool(c, "follow_up3", true)
+    fun setFollowUp(c: Context, v: Boolean) = putBool(c, "follow_up3", v)
 
     /** Sensibilidade da palavra de ativação: 0 = baixa (quase nunca sem querer), 1 = normal, 2 = alta. */
     fun wakeSensitivity(c: Context) = sp(c).getInt("wake_sens", 1).coerceIn(0, 2)
@@ -103,6 +103,9 @@ object Prefs {
     fun setStartSound(c: Context, v: String) = put(c, "sound_start", v)
     fun endSound(c: Context) = str(c, "sound_end", "fada")
     fun setEndSound(c: Context, v: String) = put(c, "sound_end", v)
+    /** Volume dos sons da Navi: 0 = baixo (padrão), 1 = médio, 2 = alto. */
+    fun soundVolume(c: Context) = sp(c).getInt("sound_vol", 0).coerceIn(0, 2)
+    fun setSoundVolume(c: Context, v: Int) = sp(c).edit().putInt("sound_vol", v.coerceIn(0, 2)).apply()
 
     /** Pergunta antes de enviar mensagens, ligar, desligar o PC etc. */
     fun confirmActions(c: Context) = bool(c, "confirm", true)

@@ -30,17 +30,15 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import org.vosk.Model
-import org.vosk.Recognizer
-import org.vosk.android.RecognitionListener
-import org.vosk.android.SpeechService
 import org.vosk.android.StorageService
 
 /**
  * Fica escutando a palavra "Navi" o tempo todo, offline (Vosk).
- * Quando ouve, solta o microfone, escuta o pedido, pensa (Gemini) e responde em voz alta.
- * Só continua ouvindo se perguntou algo (ou se o modo "continuar ouvindo" estiver ligado).
+ * "Navi, liga a TV" dito de uma vez já vira pedido (o áudio do pedido é recortado do que foi ouvido);
+ * "Navi" sozinho toca o som e escuta o pedido. Depois de responder, continua ouvindo uns segundos
+ * (ignorando conversas que não são com ela) até a pessoa parar de falar ou agradecer.
  */
-class NaviService : Service(), RecognitionListener {
+class NaviService : Service() {
 
     companion object {
         const val ACTION_STOP = "com.caio.navi.STOP"
@@ -51,11 +49,14 @@ class NaviService : Service(), RecognitionListener {
         /**
          * Palavras parecidas com "Navi" que também entram na gramática do reconhecedor offline:
          * assim ele tem para onde "mandar" sons parecidos, em vez de forçar tudo a virar "Navi".
+         * Nada de pedaços que juntos formam "na-vi" (como "na" e "vi"): eles roubavam o "Navi" de verdade.
          */
         private val DISTRACTORS = listOf(
-            "nada", "nova", "novo", "nove", "neve", "navio", "naval", "navegar", "não", "vi", "vida", "ave",
-            "davi", "levi", "lavei", "vai", "né", "nem", "na", "da", "de", "lá", "ali", "aqui", "então", "isso",
+            "nada", "nova", "novo", "nove", "neve", "navio", "naval", "navegar", "vida", "davi", "levi",
+            "então", "isso", "aqui", "agora",
         )
+        /** Quanto tempo esperar a pessoa voltar a falar depois de uma resposta. */
+        private const val FOLLOW_UP_MS = 5500L
         private const val CHANNEL = "navi_listen"
         private const val CHANNEL_ALERT = "navi_alert"
         private const val NOTIF_ID = 1
@@ -129,8 +130,7 @@ class NaviService : Service(), RecognitionListener {
     private val handler = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var model: Model? = null
-    private var recognizer: Recognizer? = null
-    private var speech: SpeechService? = null
+    private var ear: WakeEar? = null
     private var words: List<String> = emptyList()
     private var lastTrigger = 0L
     private var loading = false
@@ -202,7 +202,7 @@ class NaviService : Service(), RecognitionListener {
             // Ajustes podem ter mudado: reinicia a escuta com as palavras novas.
             restartListening(0)
         }
-        if (intent?.action == ACTION_TALK) startConversation()
+        if (intent?.action == ACTION_TALK) startConversation(null)
         return START_STICKY
     }
 
@@ -232,15 +232,18 @@ class NaviService : Service(), RecognitionListener {
 
     private fun startListening() {
         val m = model ?: return
-        if (speech != null || conversation?.isActive == true) return
+        if (ear != null || conversation?.isActive == true) return
         try {
             val grammar = JSONArray(words + DISTRACTORS.filter { it !in words } + "[unk]").toString()
-            val rec = Recognizer(m, 16000f, grammar)
-            rec.setWords(true) // devolve a confiança de cada palavra
-            val s = SpeechService(rec, 16000f)
-            recognizer = rec
-            speech = s
-            s.startListening(this)
+            val e = WakeEar(m, grammar,
+                onPartial = { json -> if (wakeHit(json, final = false) != null) trigger(null) },
+                onFinal = { json -> onWakeFinal(json) },
+                onError = { ex ->
+                    setStatus("Erro no microfone: ${ex.message}. Tentando de novo...")
+                    restartListening(5)
+                })
+            e.start()
+            ear = e
             setStatus("Escutando \"Navi\"...")
         } catch (e: Exception) {
             stopListening()
@@ -250,11 +253,8 @@ class NaviService : Service(), RecognitionListener {
     }
 
     private fun stopListening() {
-        try { speech?.stop() } catch (_: Exception) {}
-        try { speech?.shutdown() } catch (_: Exception) {}
-        try { recognizer?.close() } catch (_: Exception) {}
-        speech = null
-        recognizer = null
+        try { ear?.stop() } catch (_: Exception) {}
+        ear = null
     }
 
     private fun restartListening(delaySec: Int) {
@@ -263,37 +263,54 @@ class NaviService : Service(), RecognitionListener {
         handler.postDelayed({ if (running) startListening() }, delaySec * 1000L)
     }
 
+    /** Onde o "Navi" terminou, onde a fala terminou e quantas palavras vieram depois (o pedido). */
+    private class WakeHit(val wordEnd: Double, val speechEnd: Double, val after: Int)
+
     /**
-     * Decide se a frase ouvida pelo reconhecedor offline foi mesmo um chamado.
-     * Regras: "Navi" no começo da fala, fala curta e (no resultado final) confiança alta.
+     * Decide se a frase ouvida pelo reconhecedor offline foi mesmo um chamado: "Navi" no começo da
+     * fala (no máximo depois de um "ô"/"ei" curtinho) e com confiança suficiente para a sensibilidade.
+     * O resto da frase pode ser o pedido.
      */
-    private fun heard(json: String, final: Boolean): Boolean {
-        if (SystemClock.elapsedRealtime() < quietUntil) return false
-        val o = try { JSONObject(json) } catch (_: Exception) { return false }
-        val text = o.optString(if (final) "text" else "partial").trim()
-        if (text.isEmpty()) return false
-        val tokens = text.split(" ").filter { it.isNotEmpty() }
-        val idx = tokens.indexOfFirst { it in words }
-        if (idx < 0) return false
+    private fun wakeHit(json: String, final: Boolean): WakeHit? {
+        if (SystemClock.elapsedRealtime() < quietUntil) return null
+        val o = try { JSONObject(json) } catch (_: Exception) { return null }
         val sens = Prefs.wakeSensitivity(this)
-        if (!final) return sens == 2 && idx == 0 && tokens.size == 1 // só no modo "alta" age antes de terminar
-        val maxTokens = when (sens) { 0 -> 2; 1 -> 4; else -> 6 }
-        if (idx > 1 || tokens.size > maxTokens) return false
-        val minConf = when (sens) { 0 -> 0.97; 1 -> 0.90; else -> 0.75 }
-        val res = o.optJSONArray("result") ?: return true
-        for (i in 0 until res.length()) {
-            val w = res.optJSONObject(i) ?: continue
-            if (w.optString("word") in words) return w.optDouble("conf", 1.0) >= minConf
+        if (!final) {
+            // Só no modo "alta": age assim que ouve "Navi" sozinho (mais rápido, mas sem pedido junto).
+            val p = o.optString("partial").trim()
+            return if (sens == 2 && p in words) WakeHit(-1.0, -1.0, 0) else null
         }
-        return false
+        val res = o.optJSONArray("result") ?: return null
+        val ws = (0 until res.length()).mapNotNull { res.optJSONObject(it) }
+        val idx = ws.indexOfFirst { it.optString("word") in words }
+        if (idx < 0 || idx > 1) return null
+        val w = ws[idx]
+        val minConf = when (sens) { 0 -> 0.85; 1 -> 0.6; else -> 0.4 }
+        if (w.optDouble("conf", 1.0) < minConf) return null
+        if (idx == 1) {
+            val before = ws[0]
+            val longBefore = before.optDouble("end") - before.optDouble("start") > 0.6
+            val gap = w.optDouble("start") - before.optDouble("end")
+            if (longBefore || gap > 0.5) return null // era o meio de outra frase
+        }
+        return WakeHit(w.optDouble("end"), ws.last().optDouble("end", w.optDouble("end")), ws.size - idx - 1)
     }
 
-    private fun trigger() {
+    /** Resultado final do Vosk: "Navi" sozinho chama; "Navi, <pedido>" já leva o áudio do pedido. */
+    private fun onWakeFinal(json: String) {
+        val hit = wakeHit(json, final = true) ?: return
+        val command = if (hit.after >= 1 && hit.speechEnd - hit.wordEnd >= 0.4) {
+            ear?.wav(hit.wordEnd + 0.03, hit.speechEnd + 0.35)
+        } else null
+        trigger(command)
+    }
+
+    private fun trigger(command: ByteArray?) {
         val now = SystemClock.elapsedRealtime()
         if (now - lastTrigger < 2500) return
         lastTrigger = now
 
-        if (!Prefs.ownBrain(this) || Prefs.geminiKey(this).isEmpty()) {
+        if (!Prefs.ownBrain(this) || !hasBrain()) {
             // Modo antigo (ou sem chave do Gemini): abre o assistente do Google.
             val pause = Prefs.pauseSec(this)
             handler.removeCallbacksAndMessages(null)
@@ -304,14 +321,17 @@ class NaviService : Service(), RecognitionListener {
             handler.postDelayed({ if (running) startListening() }, pause * 1000L)
             return
         }
-        startConversation()
+        startConversation(command)
     }
+
+    private fun hasBrain() = Prefs.geminiKey(this).isNotEmpty() || Llm.hasBackups(this)
 
     // ---------------- Conversa ----------------
 
-    private fun startConversation() {
+    /** [command]: áudio do pedido dito junto com o "Navi" (ou null para escutar agora). */
+    private fun startConversation(command: ByteArray? = null) {
         if (conversation?.isActive == true) return
-        if (Prefs.geminiKey(this).isEmpty()) {
+        if (!hasBrain()) {
             setStatus("Falta a chave do Gemini nos ajustes.")
             return
         }
@@ -322,7 +342,7 @@ class NaviService : Service(), RecognitionListener {
         conversation = scope.launch {
             var hadFocus = false
             try {
-                delay(200) // dá tempo do microfone ser liberado
+                delay(60) // o microfone do "Navi" já foi solto em stopListening()
                 // Pausa a música/vídeo enquanto a Navi escuta (volta sozinha no fim).
                 hadFocus = try {
                     audio?.requestAudioFocus(focusRequest) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
@@ -330,14 +350,30 @@ class NaviService : Service(), RecognitionListener {
                     false
                 }
                 vibrate()
-                Sounds.playStart(this@NaviService, speaker)
                 val brain = NaviCore.brain(this@NaviService)
+                // "Navi, liga a TV" de uma vez: transcreve o pedido enquanto o som toca.
+                var firstText: String? = null
+                if (command != null) {
+                    setStatus("Entendendo...")
+                    val sound = launch { Sounds.playStart(this@NaviService, null) }
+                    firstText = withContext(Dispatchers.IO) {
+                        try { Llm.transcribe(this@NaviService, command) } catch (_: Exception) { null }
+                    }?.trim()?.ifEmpty { null }
+                    sound.join()
+                } else {
+                    Sounds.playStart(this@NaviService, speaker)
+                }
                 var turns = 0
                 var followUp = false
-                while (running && turns < 8) {
+                while (running && turns < 20) {
                     turns++
-                    setStatus(if (followUp) "Ouvindo (fale sem dizer Navi)..." else "Ouvindo...")
-                    val heardNow = hear(if (followUp) 4500L else 7000L) ?: break
+                    val ready = firstText
+                    firstText = null
+                    val heardNow = if (ready != null) ready to null else {
+                        if (turns == 1 && command != null) Sounds.playStart(this@NaviService, speaker) // não entendeu o pedido junto
+                        setStatus(if (followUp) "Ouvindo (fale sem dizer Navi)..." else "Ouvindo...")
+                        hear(if (followUp) FOLLOW_UP_MS else 7000L) ?: break
+                    }
                     val (text, audioWav) = heardNow
                     NaviCore.add(true, text ?: "🎤 (áudio)")
                     setStatus("Pensando...")
@@ -355,7 +391,7 @@ class NaviService : Service(), RecognitionListener {
                     if (!asked && !Prefs.followUp(this@NaviService)) break
                     // Se a Navi perguntou algo, a próxima fala é a resposta; se não, pode nem ser com ela.
                     followUp = !asked
-                    delay(150)
+                    delay(80)
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -376,10 +412,10 @@ class NaviService : Service(), RecognitionListener {
                     }
                     conversation = null
                     talking = false
-                    quietUntil = SystemClock.elapsedRealtime() + 1500
+                    quietUntil = SystemClock.elapsedRealtime() + 1200
                     setStatus(if (running) "Escutando \"Navi\"..." else "Desligada")
                     if (running) {
-                        delay(300)
+                        delay(150)
                         startListening()
                     }
                 }
@@ -453,26 +489,6 @@ class NaviService : Service(), RecognitionListener {
                 ?.vibrate(VibrationEffect.createOneShot(40, VibrationEffect.DEFAULT_AMPLITUDE))
         } catch (_: Exception) {
         }
-    }
-
-    // ---- RecognitionListener (Vosk) ----
-    override fun onPartialResult(hypothesis: String?) {
-        if (hypothesis != null && heard(hypothesis, final = false)) trigger()
-    }
-
-    override fun onResult(hypothesis: String?) {
-        if (hypothesis != null && heard(hypothesis, final = true)) trigger()
-    }
-
-    override fun onFinalResult(hypothesis: String?) {}
-
-    override fun onError(exception: Exception?) {
-        setStatus("Erro no microfone: ${exception?.message}. Tentando de novo...")
-        restartListening(5)
-    }
-
-    override fun onTimeout() {
-        restartListening(1)
     }
 
     // ---- Notificação e status ----
