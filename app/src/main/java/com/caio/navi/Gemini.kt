@@ -86,6 +86,21 @@ object Gemini {
         .put("role", "user")
         .put("parts", JSONArray().put(JSONObject().put("text", text)))
 
+    /** Transcreve um áudio WAV curto (usado quando o reconhecedor de voz do celular não funciona). */
+    fun transcribe(key: String, model: String, wav: ByteArray): String {
+        val parts = JSONArray()
+            .put(JSONObject().put("inlineData", JSONObject()
+                .put("mimeType", "audio/wav")
+                .put("data", android.util.Base64.encodeToString(wav, android.util.Base64.NO_WRAP))))
+            .put(JSONObject().put("text",
+                "Transcreva exatamente o que foi falado neste áudio, em português do Brasil. " +
+                    "Responda só com o texto falado, sem comentários. Se não houver fala, responda vazio."))
+        val body = JSONObject()
+            .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", parts)))
+            .put("generationConfig", JSONObject().put("temperature", 0))
+        return textOf(firstContent(generate(key, model, body))).trim().trim('"')
+    }
+
     /** Pesquisa no Google pelo próprio Gemini e devolve resposta curta + fontes. */
     fun webSearch(key: String, model: String, query: String): JSONObject {
         val body = JSONObject()

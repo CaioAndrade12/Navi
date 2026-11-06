@@ -291,7 +291,16 @@ class NaviService : Service(), RecognitionListener {
             delay(200)
         }
         val wav = withContext(Dispatchers.IO) { VoiceRecorder.record() } ?: return null
-        return null to wav
+        setStatus("Entendendo o áudio...")
+        val text = withContext(Dispatchers.IO) {
+            try {
+                Gemini.transcribe(Prefs.geminiKey(this@NaviService), Prefs.geminiModel(this@NaviService), wav)
+            } catch (_: Exception) {
+                null
+            }
+        }
+        if (text != null && text.isBlank()) return null // ninguém falou de verdade
+        return if (text != null) text to null else null to wav
     }
 
     private fun beep() {

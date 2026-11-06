@@ -45,19 +45,22 @@ class Brain(private val ctx: Context) {
 
     suspend fun handle(text: String?, audioWav: ByteArray? = null): Reply = lock.withLock {
         withContext(Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+            if (now - lastUse > 30 * 60_000L) reset() // conversa nova depois de 30 min parada
+            lastUse = now
+            // Se algo der errado no meio, o histórico volta a como estava (nunca fica pela metade).
+            var rollbackTo = history.size
             try {
-                val now = System.currentTimeMillis()
-                if (now - lastUse > 30 * 60_000L) reset() // conversa nova depois de 30 min parada
-                lastUse = now
-
                 val p = pending
                 if (p != null) {
                     if (now - p.askedAt > 3 * 60_000L) {
                         // Pergunta antiga demais: descarta aquela rodada inteira.
                         while (history.size > p.turnStart) history.removeAt(history.size - 1)
                         pending = null
-                    } else if (text != null) {
-                        return@withContext resolvePending(p, text)
+                        rollbackTo = history.size
+                    } else {
+                        rollbackTo = p.turnStart
+                        return@withContext resolvePending(p, text ?: "(resposta em áudio que não deu para entender)")
                     }
                 }
 
@@ -70,10 +73,14 @@ class Brain(private val ctx: Context) {
                 }
                 trimHistory()
                 reply
-            } catch (e: GeminiException) {
-                Reply(friendlyError(e))
-            } catch (e: Exception) {
-                Reply("Deu um erro aqui: ${e.message ?: e.javaClass.simpleName}.")
+            } catch (e: Throwable) {
+                pending = null
+                while (history.size > rollbackTo) history.removeAt(history.size - 1)
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                when (e) {
+                    is GeminiException -> Reply(friendlyError(e))
+                    else -> Reply("Deu um erro aqui: ${e.message ?: e.javaClass.simpleName}.")
+                }
             }
         }
     }
