@@ -90,19 +90,33 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r pc/requirements.txt pyinstaller
 
-      - name: Testar o agente
+      - name: Autoteste pelo Python
         working-directory: pc
+        shell: pwsh
         run: |
-          python -c "import acoes, json; d = acoes.declarations(); print(len(d), 'acoes'); json.dumps(d)"
-          python -c "import acoes; r = acoes.run('pc_status', {}); print(r); assert r['status'] == 'ok'"
+          python navi_pc.py --teste --silencioso --ci
+          $code = $LASTEXITCODE
+          Get-Content "$env:APPDATA\NaviPC\autoteste.txt" -Encoding utf8
+          if ($code -ne 0) { exit $code }
 
       - name: Gerar NaviPC.exe
         working-directory: pc
         run: >
           pyinstaller --onefile --noconsole --name NaviPC
-          --hidden-import comtypes.stream --hidden-import pystray._win32
-          --collect-submodules pycaw
+          --hidden-import janelas --hidden-import audio_win --hidden-import pystray._win32
           navi_pc.py
+
+      - name: Autoteste do NaviPC.exe (o arquivo que vai para o PC)
+        shell: pwsh
+        run: |
+          Remove-Item "$env:APPDATA\NaviPC\autoteste.txt" -ErrorAction SilentlyContinue
+          $p = Start-Process -FilePath "pc\dist\NaviPC.exe" -ArgumentList "--teste","--silencioso","--ci" -Wait -PassThru
+          Get-Content "$env:APPDATA\NaviPC\autoteste.txt" -Encoding utf8
+          "## Autoteste do NaviPC.exe" >> $env:GITHUB_STEP_SUMMARY
+          '```' >> $env:GITHUB_STEP_SUMMARY
+          Get-Content "$env:APPDATA\NaviPC\autoteste.txt" -Encoding utf8 >> $env:GITHUB_STEP_SUMMARY
+          '```' >> $env:GITHUB_STEP_SUMMARY
+          if ($p.ExitCode -ne 0) { Write-Error "Autoteste falhou (código $($p.ExitCode))"; exit 1 }
 
       - uses: actions/upload-artifact@v4
         with:

@@ -13,6 +13,7 @@ Segurança:
       tráfego do Wi-Fi não consegue repetir nem forjar comandos.
 """
 
+import base64
 import ctypes
 import hashlib
 import hmac
@@ -25,13 +26,15 @@ import socket
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import acoes
 
-VERSION = "2.1"
+VERSION = "2.2"
 APP_NAME = "NaviPC"
 IS_WIN = sys.platform == "win32"
 BASE = Path(os.environ.get("APPDATA", Path.home())) / APP_NAME
@@ -64,7 +67,12 @@ def load_config():
 CFG = load_config()
 
 
+TESTE = {"ativo": False}
+
+
 def save_config():
+    if TESTE["ativo"]:
+        return
     with _lock:
         CONFIG.write_text(json.dumps(CFG, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -245,7 +253,11 @@ class Handler(BaseHTTPRequestHandler):
             name, args = req.get("name", ""), req.get("args") or {}
             # No log vai só o nome da ação e os nomes dos parâmetros (não o conteúdo).
             log.info("ação %s %s", name, sorted(args.keys()) if isinstance(args, dict) else "")
-            self._send(200, acoes.run(name, args))
+            inicio = time.time()
+            res = acoes.run(name, args)
+            detalhe = str(res.get("erro") or res.get("resultado") or "")[:160]
+            log.info("resultado %s: %s em %.1fs — %s", name, res.get("status"), time.time() - inicio, detalhe)
+            self._send(200, res)
         else:
             self._send(404, {"status": "erro", "erro": "não encontrado"})
 
@@ -277,14 +289,20 @@ class Handler(BaseHTTPRequestHandler):
         save_config()
         close_pairing()
         log.info("celular pareado: %s (%s)", name, ip)
-        threading.Thread(target=message, args=(f"Celular pareado: {name}",), daemon=True).start()
+        if not TESTE["ativo"]:
+            threading.Thread(target=message, args=(f"Celular pareado: {name}",), daemon=True).start()
         self._send(200, {"status": "ok", "key": key, "name": socket.gethostname(), "mac": mac_address()})
 
 
 def serve():
-    srv = ThreadingHTTPServer(("0.0.0.0", int(CFG["port"])), Handler)
+    try:
+        srv = ThreadingHTTPServer(("0.0.0.0", int(CFG["port"])), Handler)
+    except OSError as e:
+        log.error("não consegui abrir a porta %s: %s", CFG["port"], e)
+        message(f"A porta {CFG['port']} já está em uso. Feche a outra cópia da Navi PC ou mude a porta no config.json.")
+        return
     srv.daemon_threads = True
-    log.info("ouvindo em %s:%s", local_ip(), CFG["port"])
+    log.info("ouvindo em %s:%s (versão %s)", local_ip(), CFG["port"], VERSION)
     srv.serve_forever()
 
 
@@ -351,6 +369,205 @@ def toggle_powershell():
                                           if CFG["allow_powershell"] else "BLOQUEADOS."))
 
 
+# ------------------------------------------------------------------ diagnóstico de rede e firewall
+
+def caminho_exe():
+    return sys.executable if getattr(sys, "frozen", False) else ""
+
+
+def diagnostico_rede():
+    """Procura o que pode impedir o celular de falar com o PC. Devolve lista de problemas (texto)."""
+    problemas = []
+    ip = local_ip()
+    perfis = acoes.ps_json(
+        f"Get-NetIPAddress -IPAddress '{ip}' -ErrorAction SilentlyContinue | ForEach-Object {{ "
+        "Get-NetConnectionProfile -InterfaceIndex $_.InterfaceIndex -ErrorAction SilentlyContinue } | "
+        "Select-Object Name,InterfaceAlias,@{n='Categoria';e={$_.NetworkCategory.ToString()}}")
+    for p in perfis:
+        if p.get("Categoria") == "Public":
+            problemas.append(f"A rede \"{p.get('Name')}\" está como PÚBLICA, e o Windows bloqueia o celular nela.")
+    exe = caminho_exe()
+    if exe:
+        regras = acoes.ps_json(
+            f"Get-NetFirewallApplicationFilter -Program '{exe}' -ErrorAction SilentlyContinue | "
+            "Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.Direction -eq 'Inbound' } | "
+            "Select-Object DisplayName,@{n='Acao';e={$_.Action.ToString()}},@{n='Ativa';e={$_.Enabled.ToString()}}",
+            timeout=60)
+        if any(r.get("Acao") == "Block" and r.get("Ativa") == "True" for r in regras):
+            problemas.append("Existe uma regra do Firewall BLOQUEANDO a Navi PC (acontece quando se clica em Cancelar "
+                             "no aviso do Windows).")
+    return problemas
+
+
+def corrigir_rede():
+    """Torna a rede de casa privada e libera a Navi no Firewall (pede administrador)."""
+    exe = caminho_exe()
+    ip = local_ip()
+    porta = int(CFG["port"])
+    script = f"""
+$ip = '{ip}'
+$idx = (Get-NetIPAddress -IPAddress $ip -ErrorAction SilentlyContinue).InterfaceIndex
+if ($idx) {{ Get-NetConnectionProfile -InterfaceIndex $idx -ErrorAction SilentlyContinue |
+  Where-Object {{ $_.NetworkCategory -eq 'Public' }} | Set-NetConnectionProfile -NetworkCategory Private }}
+Remove-NetFirewallRule -DisplayName 'Navi PC' -ErrorAction SilentlyContinue
+New-NetFirewallRule -DisplayName 'Navi PC' -Direction Inbound -Action Allow -Protocol TCP -LocalPort {porta} -Profile Private,Domain | Out-Null
+"""
+    if exe:
+        script += f"""
+$exe = '{exe}'
+Get-NetFirewallApplicationFilter -Program $exe -ErrorAction SilentlyContinue | Get-NetFirewallRule -ErrorAction SilentlyContinue |
+  Where-Object {{ $_.Action -eq 'Block' }} | Remove-NetFirewallRule
+Remove-NetFirewallRule -DisplayName 'Navi PC (programa)' -ErrorAction SilentlyContinue
+New-NetFirewallRule -DisplayName 'Navi PC (programa)' -Direction Inbound -Action Allow -Program $exe -Profile Private,Domain | Out-Null
+"""
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    ctypes.windll.shell32.ShellExecuteW(None, "runas", "powershell.exe",
+                                        f"-NoProfile -ExecutionPolicy Bypass -EncodedCommand {encoded}", None, 0)
+
+
+def checar_rede_no_inicio():
+    """Na primeira vez de cada versão, avisa se a rede/firewall estiver atrapalhando."""
+    if CFG.get("rede_ok_versao") == VERSION:
+        return
+    try:
+        problemas = diagnostico_rede()
+    except Exception as e:
+        log.info("diagnóstico de rede falhou: %s", e)
+        return
+    if not problemas:
+        CFG["rede_ok_versao"] = VERSION
+        save_config()
+        return
+    log.info("problemas de rede: %s", problemas)
+    texto = ("A Navi encontrou algo que pode impedir o celular de controlar este PC:\n\n- " + "\n- ".join(problemas) +
+             "\n\nQuer que eu corrija agora? (o Windows vai pedir permissão de administrador)")
+    if IS_WIN and ctypes.windll.user32.MessageBoxW(0, texto, "Navi PC", 0x04 | 0x30 | 0x1000) == 6:  # Sim
+        corrigir_rede()
+
+
+# ------------------------------------------------------------------ autoteste
+
+def autoteste(ci=False):
+    """Testa o NaviPC de verdade: servidor, pareamento, assinatura e as ações. Devolve (passou, texto)."""
+    linhas, criticos = [], []
+
+    def reg(nome, passou, detalhe="", critico=False):
+        linhas.append(("OK   " if passou else "FALHA") + f"  {nome}" + (f" — {detalhe}" if detalhe else ""))
+        if critico and not passou:
+            criticos.append(nome)
+
+    TESTE["ativo"] = True
+    dispositivos = list(CFG["devices"])
+    try:
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        srv.daemon_threads = True
+        porta = srv.server_address[1]
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{porta}"
+
+        def http(metodo, caminho, corpo=b"", cab=None):
+            req = urllib.request.Request(base + caminho, data=corpo if metodo == "POST" else None,
+                                         method=metodo, headers=cab or {})
+            try:
+                with urllib.request.urlopen(req, timeout=60) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, json.loads(e.read() or b"{}")
+
+        st, r = http("GET", "/ping")
+        reg("servidor responde", st == 200 and r.get("app") == "navi-pc", f"versão {r.get('version')}", True)
+
+        codigo = open_pairing(1)
+        st, r = http("POST", "/pair", json.dumps({"code": codigo, "device": "autoteste"}).encode())
+        chave = r.get("key", "")
+        reg("pareamento", st == 200 and len(chave) == 64, critico=True)
+
+        def assinado(metodo, caminho, corpo=b""):
+            ts, nonce = str(int(time.time())), secrets.token_hex(12)
+            cab = {"X-Navi-Device": device_id(chave), "X-Navi-Ts": ts, "X-Navi-Nonce": nonce,
+                   "X-Navi-Sig": sign(chave, metodo, caminho, ts, nonce, corpo)}
+            return cab
+
+        cab = assinado("GET", "/tools")
+        st, r = http("GET", "/tools", cab=cab)
+        reg("lista de ações (pedido assinado)", st == 200 and len(r.get("tools", [])) > 10,
+            f"{len(r.get('tools', []))} ações", True)
+        st2, _ = http("GET", "/tools", cab=cab)
+        reg("bloqueia pedido repetido", st2 == 401, critico=True)
+        st3, _ = http("GET", "/tools")
+        reg("bloqueia pedido sem assinatura", st3 == 401, critico=True)
+
+        def acao(nome, args, critico=False, esperado="ok"):
+            corpo = json.dumps({"name": nome, "args": args}).encode()
+            st, r = http("POST", "/run", corpo, assinado("POST", "/run", corpo))
+            passou = st == 200 and r.get("status") == esperado
+            detalhe = str(r.get("resultado") or r.get("erro") or r.get("saida") or "")[:120]
+            if nome == "pc_status" and passou:
+                detalhe = f"CPU {r.get('cpu_porcentagem')}%, memória {r.get('memoria_porcentagem')}%"
+            reg(f"ação {nome} {args if args else ''}".strip(), passou, detalhe, critico)
+            return r
+
+        acao("pc_status", {}, critico=True)
+        vol = acao("pc_volume", {"acao": "consultar"})
+        if vol.get("status") == "ok":
+            atual = int(vol.get("volume", 30))
+            acao("pc_volume", {"acao": "definir", "nivel": atual})
+        acao("pc_janelas", {}, critico=True)
+        progs = acoes.programas()
+        reg("programas do menu Iniciar", len(progs) > 0, f"{len(progs)} encontrados", True)
+        reg("acentos preservados", not any("\ufffd" in n for n, _, _ in progs), critico=True)
+        if ci:
+            # Só no GitHub: abre e fecha o Bloco de Notas de verdade.
+            r = acao("pc_abrir", {"alvo": "Bloco de Notas"}, critico=True)
+            j = acoes.janelas.achar("notepad") or acoes.janelas.achar("bloco de notas")
+            reg("janela do Bloco de Notas apareceu", j is not None, j.titulo if j else "", True)
+            if j:
+                acoes.janelas.fechar(j.hwnd)
+            acao("pc_abrir", {"alvo": "programa que nao existe xyz"}, esperado="erro")
+            try:
+                vid, titulo = acoes.primeiro_video("Charlie Brown Jr Só os Loucos Sabem")
+                reg("busca no YouTube", bool(vid), f"{vid} {titulo}")
+            except Exception as e:
+                reg("busca no YouTube", False, str(e)[:100])
+        acao("pc_powershell", {"comando": "Get-Date -Format yyyy"}, critico=True)
+        try:
+            problemas = diagnostico_rede()
+            reg("rede e firewall", not problemas, "; ".join(problemas) or f"IP {local_ip()}")
+        except Exception as e:
+            reg("rede e firewall", False, str(e)[:120])
+        srv.shutdown()
+    except Exception as e:
+        reg("autoteste", False, f"{type(e).__name__}: {e}", True)
+    finally:
+        CFG["devices"] = dispositivos
+        TESTE["ativo"] = False
+        close_pairing()
+
+    passou = not criticos
+    texto = (f"Navi PC {VERSION} — autoteste {'APROVADO' if passou else 'COM FALHAS'}\n"
+             f"Data: {time.strftime('%d/%m/%Y %H:%M')}\n\n" + "\n".join(linhas))
+    try:
+        (BASE / "autoteste.txt").write_text(texto, encoding="utf-8")
+    except Exception:
+        pass
+    return passou, texto
+
+
+def mostrar_diagnostico():
+    passou, texto = autoteste()
+    problemas = []
+    try:
+        problemas = diagnostico_rede()
+    except Exception:
+        pass
+    if problemas and IS_WIN:
+        pergunta = texto + "\n\nEncontrei problemas de rede/firewall. Corrigir agora? (pede administrador)"
+        if ctypes.windll.user32.MessageBoxW(0, pergunta, "Navi PC — diagnóstico", 0x04 | 0x30 | 0x1000) == 6:
+            corrigir_rede()
+    else:
+        message(texto, "Navi PC — diagnóstico")
+
+
 def single_instance():
     """Evita abrir duas cópias."""
     if not IS_WIN:
@@ -379,6 +596,9 @@ def tray():
         pystray.MenuItem("Parear um celular", lambda i, it: show_pairing(), default=True),
         pystray.MenuItem("Status", lambda i, it: threading.Thread(target=message, args=(pairing_text(),),
                                                                   daemon=True).start()),
+        pystray.MenuItem("Testar tudo (diagnóstico)", lambda i, it: threading.Thread(target=mostrar_diagnostico,
+                                                                                    daemon=True).start()),
+        pystray.MenuItem("Corrigir rede/firewall", lambda i, it: corrigir_rede()),
         pystray.MenuItem("Permitir/bloquear PowerShell", lambda i, it: toggle_powershell()),
         pystray.MenuItem("Iniciar com o Windows", lambda i, it: install()),
         pystray.MenuItem("Desparear todos os celulares", lambda i, it: unpair_all()),
@@ -389,6 +609,11 @@ def tray():
 
 
 def main():
+    if "--teste" in sys.argv:
+        passou, texto = autoteste(ci="--ci" in sys.argv)
+        if "--silencioso" not in sys.argv:
+            message(texto, "Navi PC — autoteste")
+        sys.exit(0 if passou else 1)
     if "--desinstalar" in sys.argv:
         uninstall()
         return
@@ -398,6 +623,7 @@ def main():
     if "--instalar" in sys.argv:
         install()
     threading.Thread(target=serve, daemon=True).start()
+    threading.Thread(target=checar_rede_no_inicio, daemon=True).start()
     if not CFG["devices"]:
         # Nenhum celular pareado ainda: abre o pareamento por 10 minutos e mostra o código.
         show_pairing(10)
