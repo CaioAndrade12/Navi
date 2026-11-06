@@ -111,8 +111,8 @@ Para ligar o PC pelo celular ("Navi, liga o PC"), ative o Wake-on-LAN na BIOS e 
 
 ## Voltar para a versão antiga
 
-A versão que só abria o Gemini está marcada como `v1` no Git. Também dá para desmarcar em
-Ajustes *"A própria Navi responde"*.
+A versão que só abria o Gemini é o commit `fe331f5` (`git checkout fe331f5`). Sem mexer no código,
+dá para voltar a esse comportamento desmarcando em Ajustes *"A própria Navi responde"*.
 
 > A chave de assinatura (`app/navi.keystore`) está no repositório de propósito, para que
 > cada build instale por cima da anterior. É um app pessoal; não use essa chave para nada sério.
