@@ -31,6 +31,24 @@ jobs:
           mv model_tmp/vosk-model-small-pt-0.3 app/src/main/assets/model-pt
           echo "pt-0.3-${GITHUB_SHA}" > app/src/main/assets/model-pt/uuid
 
+      - name: Chave de assinatura
+        env:
+          KS_B64: ${{ secrets.NAVI_KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.NAVI_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KS_B64" ] && [ -n "$KS_PASS" ]; then
+            echo "$KS_B64" | base64 -d > app/navi-release.keystore
+            {
+              echo "storeFile=navi-release.keystore"
+              echo "storePassword=$KS_PASS"
+              echo "keyAlias=navi"
+              echo "keyPassword=$KS_PASS"
+            } > app/signing.properties
+            echo "🔐 APK assinado com a chave nova (segredo do repositório)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "⚠️ APK assinado com a chave antiga, que já foi pública. Rode tools/nova-chave-assinatura.ps1 (veja o README)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Compilar
         run: |
           set -o pipefail

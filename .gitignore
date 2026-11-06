@@ -12,3 +12,5 @@ __pycache__/
 pc/build/
 pc/dist/
 *.spec
+app/signing.properties
+app/navi-release.keystore

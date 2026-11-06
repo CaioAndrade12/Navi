@@ -103,6 +103,10 @@ Para ligar o PC pelo celular ("Navi, liga o PC"), ative o Wake-on-LAN na BIOS e 
   permite repetir comandos. O PC não abre executáveis nem caminhos de rede pedidos pela IA.
 - **Chaves guardadas:** Gemini, Gmail e PC ficam criptografados com o Android Keystore.
 - **Mensagens:** guardadas só por 48 horas; apps desligados não são lidos nem guardados.
+- **Chave de assinatura do APK:** a antiga ficou pública enquanto o repositório era aberto. Para trocar
+  (uma vez, no PC): rode `powershell -ExecutionPolicy Bypass -File tools\nova-chave-assinatura.ps1`,
+  crie os dois segredos que ele indicar em *Settings > Secrets and variables > Actions* e rode o build
+  de novo (aba *Actions* > *Run workflow*). No celular, `bash setup.sh` troca a versão sozinho.
 - **Plano grátis do Gemini:** o Google pode usar as conversas para melhorar os produtos. Desligue os
   apps que não quer que passem pela IA, ou ative o faturamento no AI Studio.
 
@@ -143,6 +147,5 @@ Para ligar o PC pelo celular ("Navi, liga o PC"), ative o Wake-on-LAN na BIOS e 
 A versão que só abria o Gemini é o commit `fe331f5` (`git checkout fe331f5`). Sem mexer no código,
 dá para voltar a esse comportamento desmarcando em Ajustes *"A própria Navi responde"*.
 
-> A chave de assinatura do app fica em `app/` porque o repositório é privado. **Se um dia deixar o
-> repositório público, gere uma chave nova antes.** Suas chaves (Gemini, Gmail, PC) ficam só no
-> celular, nunca no repositório.
+> A chave de assinatura nova fica só nos segredos do GitHub, nunca no código. Suas chaves
+> (Gemini, Gmail, PC) ficam só no celular, criptografadas.
