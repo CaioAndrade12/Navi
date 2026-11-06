@@ -76,6 +76,17 @@ object Prefs {
     fun userName(c: Context) = str(c, "user_name", "Caio").trim()
     fun setUserName(c: Context, v: String) = put(c, "user_name", v.trim())
 
+    // ---- Cérebros reserva (Llm.PRESETS: groq, cerebras, openrouter, mistral) ----
+    /** Chave de cada provedor, guardada criptografada. */
+    fun providerKey(c: Context, id: String) = secret(c, "key_$id").trim()
+    fun setProviderKey(c: Context, id: String, v: String) = putSecret(c, "key_$id", v.trim())
+    /** Modelo escolhido para o provedor (vazio = o padrão do app). */
+    fun providerModel(c: Context, id: String) = str(c, "model_$id").trim()
+    fun setProviderModel(c: Context, id: String, v: String) = put(c, "model_$id", v.trim())
+    /** Qual é o terceiro cérebro (o segundo é sempre o Groq). */
+    fun thirdProvider(c: Context) = str(c, "third_provider", "cerebras")
+    fun setThirdProvider(c: Context, v: String) = put(c, "third_provider", v)
+
     /**
      * Depois de responder, continua ouvindo por alguns segundos sem precisar dizer "Navi"
      * (ignorando falas que não forem com ela). Desligado: só continua quando a Navi pergunta algo.

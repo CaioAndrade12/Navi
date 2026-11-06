@@ -51,7 +51,6 @@ class Brain(private val ctx: Context) {
     private val history = mutableListOf<JSONObject>()
     private var pending: Batch? = null
     private var lastUse = 0L
-    private var noThinkingConfig = false
     private val lock = Mutex()
     /** A rodada atual já leu conteúdo de terceiros (mensagens, e-mails, web)? */
     private var turnTainted = false
@@ -133,11 +132,7 @@ class Brain(private val ctx: Context) {
 
     private fun userContent(text: String?, audio: ByteArray?, followUp: Boolean): JSONObject {
         val parts = JSONArray()
-        val note = if (followUp) {
-            "(Fala ouvida logo depois da sua resposta, SEM a pessoa dizer \"Navi\". Se ela claramente não for " +
-                "para você — por exemplo, pessoas conversando entre si, TV ou música ao fundo — responda apenas " +
-                "[IGNORAR] e nada mais.) "
-        } else ""
+        val note = if (followUp) FOLLOW_UP_NOTE else ""
         if (audio != null) {
             parts.put(JSONObject().put("inlineData", JSONObject()
                 .put("mimeType", "audio/wav")
@@ -293,35 +288,8 @@ class Brain(private val ctx: Context) {
         return JSONObject().put("role", "user").put("parts", parts)
     }
 
-    private fun callModel(): JSONObject {
-        val key = Prefs.geminiKey(ctx)
-        val model = Prefs.geminiModel(ctx)
-        return try {
-            Gemini.generate(key, model, requestBody())
-        } catch (e: GeminiException) {
-            when {
-                e.code == 400 && !noThinkingConfig && e.message.orEmpty().contains("think", true) -> {
-                    noThinkingConfig = true
-                    Gemini.generate(key, model, requestBody())
-                }
-                (e.code == 429 || e.code == 404 || e.code >= 500) && model != Prefs.FALLBACK_MODEL ->
-                    Gemini.generate(key, Prefs.FALLBACK_MODEL, requestBody())
-                else -> throw e
-            }
-        }
-    }
-
-    private fun requestBody(): JSONObject {
-        val decls = JSONArray()
-        for (t in Toolbox.all(ctx)) decls.put(t.declaration())
-        val gen = JSONObject().put("temperature", 0.7).put("maxOutputTokens", 4096)
-        if (!noThinkingConfig) gen.put("thinkingConfig", JSONObject().put("thinkingLevel", "low"))
-        return JSONObject()
-            .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", systemPrompt()))))
-            .put("contents", JSONArray(history))
-            .put("tools", JSONArray().put(JSONObject().put("functionDeclarations", decls)))
-            .put("generationConfig", gen)
-    }
+    /** Gemini primeiro; se ele estiver no limite ou fora do ar, os cérebros reserva (Llm). */
+    private fun callModel(): JSONObject = Llm.chat(ctx, systemPrompt(), history, Toolbox.all(ctx))
 
     private fun systemPrompt(): String {
         val name = Prefs.userName(ctx).ifEmpty { "o usuário" }
@@ -381,13 +349,18 @@ class Brain(private val ctx: Context) {
         e.code == 401 || (e.code == 403 && e.message.orEmpty().contains("key", true)) ||
             e.message.orEmpty().contains("API key not valid", true) ->
             "Minha chave do Gemini não está funcionando. Confira nos ajustes da Navi."
-        e.code == 429 -> "Atingi o limite de uso do Gemini por agora. Tenta de novo daqui a pouco."
+        e.code == 429 && Llm.hasBackups(ctx) -> "Todos os meus cérebros estão no limite de uso agora. Tenta de novo daqui a pouco."
+        e.code == 429 -> "Atingi o limite de uso do Gemini por agora. Tenta de novo daqui a pouco, ou cadastre um cérebro reserva nos ajustes."
         e.code == -1 -> "Estou sem internet para pensar agora."
         e.message.orEmpty().contains("Falta a chave") -> e.message.orEmpty()
-        else -> "O Gemini deu erro: ${e.message.orEmpty().take(120)}"
+        else -> "O cérebro deu erro: ${e.message.orEmpty().take(120)}"
     }
 
     companion object {
+        const val FOLLOW_UP_NOTE = "(Fala ouvida logo depois da sua resposta, SEM a pessoa dizer \"Navi\". Se ela " +
+            "claramente não for para você — por exemplo, pessoas conversando entre si, TV ou música ao fundo — " +
+            "responda apenas [IGNORAR] e nada mais.) "
+
         private val YES = setOf(
             "sim", "pode", "manda", "mande", "envia", "envie", "confirmo", "confirma", "confirmado",
             "isso", "claro", "ok", "okay", "beleza", "bora", "vai", "positivo", "certo", "exato",

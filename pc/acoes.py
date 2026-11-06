@@ -293,7 +293,8 @@ def pc_saida_som(acao, dispositivo=None, tipo="saida"):
     lista = audio_win.dispositivos(fluxo)
     oque = "microfone" if fluxo else "saída de som"
     if not lista:
-        return erro(f"Não achei nenhum {oque} ligado no PC.")
+        return erro("Não achei nenhum microfone ligado no PC." if fluxo else
+                    "Não achei nenhuma saída de som ligada no PC.")
     if acao == "listar" or not dispositivo:
         atual = next((d["nome"] for d in lista if d["padrao"]), None)
         return ok(f"{'Microfones' if fluxo else 'Saídas de som'}: " + "; ".join(d["nome"] for d in lista) +
@@ -484,6 +485,8 @@ def pc_monitor(acao, nivel=None):
             if acao == "consultar":
                 brilho = monitor.porcentagem(m, "brilho")
                 ent = monitor.Monitores.ler(m, "entrada")
+                if brilho is None and contraste is None and not ent:
+                    continue  # esse monitor não responde pelo cabo
                 info.append({"monitor": nome, "brilho": brilho, "contraste": contraste,
                              "entrada": monitor.NOMES_ENTRADA.get(ent[0] & 0xFF, str(ent[0])) if ent else None})
                 continue
@@ -804,10 +807,11 @@ def primeiro_resultado(busca):
         if href.startswith("//"):
             href = "https:" + href
         partes = urllib.parse.urlparse(href)
-        if "duckduckgo.com" in partes.netloc:
-            if partes.path.startswith("/y.js"):
-                continue  # anúncio
+        if "duckduckgo.com" in partes.netloc and partes.path.startswith("/l/"):
             href = urllib.parse.parse_qs(partes.query).get("uddg", [""])[0]
+            partes = urllib.parse.urlparse(href)
+        if "duckduckgo.com" in partes.netloc or "ad_domain=" in href or "ad_provider=" in href:
+            continue  # anúncio ou página interna da busca
         if href.startswith(("http://", "https://")):
             return href
     return None
@@ -1302,6 +1306,9 @@ def run(name, args):
         return erro(f"Parâmetros errados para {name}: {e}")
     except subprocess.TimeoutExpired:
         return erro("O Windows demorou demais para responder.")
+    except (OSError, ValueError) as e:  # mensagens nossas, já em português
+        texto = str(e)
+        return erro(texto if texto and "violation" not in texto.lower() else f"{type(e).__name__}: {e}")
     except Exception as e:
         return erro(f"{type(e).__name__}: {e}")
 

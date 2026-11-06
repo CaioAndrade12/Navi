@@ -22,7 +22,7 @@ object Gemini {
         .build()
 
     /** Chama generateContent e devolve a resposta inteira. Lança GeminiException em erro. */
-    fun generate(key: String, model: String, body: JSONObject): JSONObject {
+    fun generate(key: String, model: String, body: JSONObject, client: OkHttpClient = http): JSONObject {
         if (key.isBlank()) throw GeminiException("Falta a chave da Gemini API nos ajustes.", 401)
         val req = Request.Builder()
             .url("$BASE$model:generateContent")
@@ -30,7 +30,7 @@ object Gemini {
             .post(body.toString().toRequestBody(JSON_TYPE))
             .build()
         try {
-            http.newCall(req).execute().use { r ->
+            client.newCall(req).execute().use { r ->
                 val text = r.body?.string().orEmpty()
                 if (!r.isSuccessful) {
                     val msg = try {

@@ -437,7 +437,7 @@ class NaviService : Service(), RecognitionListener {
         setStatus("Entendendo o áudio...")
         val text = withContext(Dispatchers.IO) {
             try {
-                Gemini.transcribe(Prefs.geminiKey(this@NaviService), Prefs.geminiModel(this@NaviService), wav)
+                Llm.transcribe(this@NaviService, wav)
             } catch (_: Exception) {
                 null
             }

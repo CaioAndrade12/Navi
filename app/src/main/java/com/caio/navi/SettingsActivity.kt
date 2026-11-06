@@ -45,6 +45,12 @@ class SettingsActivity : Activity() {
         btn(R.id.btnGetKey) { open(Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/apikey"))) }
         btn(R.id.btnAppPassword) { open(Intent(Intent.ACTION_VIEW, Uri.parse("https://myaccount.google.com/apppasswords"))) }
         btn(R.id.btnTestBrain) { testBrain() }
+        btn(R.id.btnGroqKey) { open(Intent(Intent.ACTION_VIEW, Uri.parse(Llm.PRESETS.getValue("groq").keyUrl))) }
+        btn(R.id.btnThirdKey) {
+            val p = Llm.PRESETS[shownThird] ?: Llm.PRESETS.getValue("cerebras")
+            open(Intent(Intent.ACTION_VIEW, Uri.parse(p.keyUrl)))
+        }
+        btn(R.id.btnTestBrains) { busy("Testando os cérebros") { withContext(Dispatchers.IO) { Llm.testAll(this@SettingsActivity) } } }
         btn(R.id.btnFindTv) { findTv() }
         btn(R.id.btnTestTv) { testTv() }
         btn(R.id.btnFindPc) { findPc() }
@@ -174,13 +180,49 @@ class SettingsActivity : Activity() {
         val players = linkedMapOf("" to "Automático (o primeiro instalado)")
         MediaControl.installed(this).forEach { players[it.pkg] = it.label }
         fillRadios(R.id.musicApps, players, Prefs.musicApp(this))
+        et(R.id.groqKey).setText(Prefs.providerKey(this, "groq"))
+        val third = findViewById<RadioGroup>(R.id.thirdProvider)
+        third.setOnCheckedChangeListener(null)
+        fillRadios(R.id.thirdProvider,
+            Llm.THIRD.associateWith { id -> Llm.PRESETS.getValue(id).let { "${it.label} — ${it.about}" } },
+            Prefs.thirdProvider(this))
+        showThird(checkedKey(R.id.thirdProvider) ?: Prefs.thirdProvider(this))
+        third.setOnCheckedChangeListener { _, _ ->
+            saveThird()
+            checkedKey(R.id.thirdProvider)?.let { id ->
+                Prefs.setThirdProvider(this, id)
+                showThird(id)
+            }
+        }
+        findViewById<android.widget.TextView>(R.id.brainsInfo).text = Llm.status()
         findViewById<RadioGroup>(R.id.wakeSens).check(
             when (Prefs.wakeSensitivity(this)) { 0 -> R.id.sensLow; 2 -> R.id.sensHigh; else -> R.id.sensNormal })
         fillRadios(R.id.startSound, Sounds.START_OPTIONS, Prefs.startSound(this))
         fillRadios(R.id.endSound, Sounds.END_OPTIONS, Prefs.endSound(this))
     }
 
+    /** Qual terceiro cérebro os campos de chave/modelo estão mostrando agora. */
+    private var shownThird = ""
+
+    private fun showThird(id: String) {
+        shownThird = id
+        val p = Llm.PRESETS[id] ?: return
+        et(R.id.thirdKey).setText(Prefs.providerKey(this, id))
+        et(R.id.thirdKey).hint = "Chave do ${p.label}"
+        et(R.id.thirdModel).setText(Prefs.providerModel(this, id))
+        et(R.id.thirdModel).hint = "Modelo (vazio = ${p.models.first()})"
+        findViewById<Button>(R.id.btnThirdKey).text = "Pegar chave grátis do ${p.label}"
+    }
+
+    private fun saveThird() {
+        if (shownThird.isEmpty()) return
+        Prefs.setProviderKey(this, shownThird, et(R.id.thirdKey).text.toString())
+        Prefs.setProviderModel(this, shownThird, et(R.id.thirdModel).text.toString())
+    }
+
     private fun save() {
+        Prefs.setProviderKey(this, "groq", et(R.id.groqKey).text.toString())
+        saveThird()
         Prefs.setGeminiKey(this, et(R.id.geminiKey).text.toString())
         Prefs.setGeminiModel(this, et(R.id.geminiModel).text.toString().ifBlank { Prefs.DEFAULT_MODEL })
         Prefs.setUserName(this, et(R.id.userName).text.toString())
@@ -335,6 +377,7 @@ class SettingsActivity : Activity() {
     private fun refresh() {
         val pm = getSystemService(PowerManager::class.java)
         fun mark(ok: Boolean) = if (ok) "✅" else "⚠️"
+        findViewById<TextView>(R.id.brainsInfo).text = Llm.status()
         findViewById<TextView>(R.id.perms).text = buildString {
             appendLine("${mark(granted(Manifest.permission.RECORD_AUDIO))}  Microfone")
             appendLine("${mark(Build.VERSION.SDK_INT < 33 || granted(Manifest.permission.POST_NOTIFICATIONS))}  Notificações")

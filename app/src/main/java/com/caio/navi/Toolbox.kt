@@ -316,7 +316,7 @@ object Toolbox {
         Tool("pesquisar_web", "Pesquisa na internet (Google) para responder sobre fatos atuais: notícias, clima, preços, placares, horários, lançamentos.",
             obj("pergunta" to str("o que pesquisar"), required = listOf("pergunta"))
         ) { a ->
-            val r = Gemini.webSearch(Prefs.geminiKey(c), Prefs.geminiModel(c), a.s("pergunta"))
+            val r = Llm.webSearch(c, a.s("pergunta"))
             r.put("status", "ok")
         },
         Tool("memoria_salvar", "Guarda um fato importante sobre o usuário para lembrar sempre (ex.: nomes, preferências, qual HDMI é o videogame).",

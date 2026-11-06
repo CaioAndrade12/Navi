@@ -43,6 +43,26 @@
             <Button android:id="@+id/btnTestBrain" style="@style/BtnPrimary" android:text="Testar o cérebro" />
         </LinearLayout>
 
+        <!-- ================= Cérebros reserva ================= -->
+        <LinearLayout style="@style/Card">
+            <TextView style="@style/CardTitle" android:text="🔁  Cérebros reserva (troca automática)" />
+            <TextView style="@style/Hint"
+                android:text="Quando o Gemini chega no limite grátis ou cai, a Navi passa sozinha para estes, sem perder a conversa, e volta para o Gemini quando ele liberar. Todos têm chave grátis." />
+            <Button android:id="@+id/btnGroqKey" style="@style/BtnSecondary" android:text="Pegar chave grátis do Groq" />
+            <EditText android:id="@+id/groqKey" style="@style/Field"
+                android:hint="Chave do Groq (começa com gsk_)" android:inputType="textPassword" />
+            <TextView style="@style/Hint" android:layout_marginTop="12dp" android:text="Terceiro cérebro" />
+            <RadioGroup android:id="@+id/thirdProvider" android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+            <Button android:id="@+id/btnThirdKey" style="@style/BtnSecondary" android:text="Pegar chave grátis" />
+            <EditText android:id="@+id/thirdKey" style="@style/Field"
+                android:hint="Chave do terceiro cérebro" android:inputType="textPassword" />
+            <EditText android:id="@+id/thirdModel" style="@style/Field"
+                android:hint="Modelo (vazio = padrão)" android:inputType="text" />
+            <TextView android:id="@+id/brainsInfo" style="@style/Hint" />
+            <Button android:id="@+id/btnTestBrains" style="@style/BtnPrimary" android:text="Testar todos os cérebros" />
+        </LinearLayout>
+
         <!-- ================= Privacidade ================= -->
         <LinearLayout style="@style/Card">
             <TextView style="@style/CardTitle" android:text="🔒  Privacidade e acesso" />
