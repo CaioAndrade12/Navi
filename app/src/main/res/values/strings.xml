@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_desc">A Navi usa a acessibilidade só para apertar \"Enviar\" no WhatsApp quando você pede para ela mandar uma mensagem. Ela não lê nem guarda o que aparece na tela.</string>
+</resources>

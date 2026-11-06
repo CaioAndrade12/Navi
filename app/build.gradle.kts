@@ -48,10 +48,28 @@ android {
         abortOnError = false
         checkReleaseBuilds = false
     }
+    packaging {
+        resources {
+            excludes += setOf(
+                "META-INF/NOTICE.md", "META-INF/LICENSE.md", "META-INF/NOTICE.txt",
+                "META-INF/LICENSE.txt", "META-INF/DEPENDENCIES", "META-INF/*.kotlin_module"
+            )
+        }
+    }
 }
 
 dependencies {
-    // Reconhecimento de voz offline (sem conta, sem chave, tudo no celular)
+    // Palavra de ativação offline (sem conta, sem chave, tudo no celular)
     implementation("net.java.dev.jna:jna:5.13.0@aar")
     implementation("com.alphacephei:vosk-android:0.3.47@aar")
+
+    // Tarefas em segundo plano sem travar a tela
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+
+    // HTTP e WebSocket (Gemini, TV Samsung, agente do PC)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // Gmail por IMAP/SMTP com senha de app
+    implementation("com.sun.mail:android-mail:1.6.7")
+    implementation("com.sun.mail:android-activation:1.6.7")
 }

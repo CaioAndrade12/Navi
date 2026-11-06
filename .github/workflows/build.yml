@@ -1,15 +1,15 @@
-name: Compilar APK
+name: Compilar APK e NaviPC
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   workflow_dispatch: {}
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  android:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,10 +30,25 @@ jobs:
           mkdir -p app/src/main/assets
           mv model_tmp/vosk-model-small-pt-0.3 app/src/main/assets/model-pt
           echo "pt-0.3-${GITHUB_SHA}" > app/src/main/assets/model-pt/uuid
-          ls -la app/src/main/assets/model-pt
 
       - name: Compilar
-        run: gradle assembleRelease --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
+
+      - name: Mostrar erros de compilação
+        if: failure()
+        run: |
+          echo '## Erros de compilação' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -E '^e: |error:|ERROR:|What went wrong|Execution failed|Unresolved|AAPT' build.log | head -80 >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -E '^e: ' build.log | head -40 | while IFS= read -r line; do
+            f=$(echo "$line" | sed -E 's#^e: (file://)?([^:]+):([0-9]+):([0-9]+).*#\2#')
+            l=$(echo "$line" | sed -E 's#^e: (file://)?([^:]+):([0-9]+):([0-9]+).*#\3#')
+            m=$(echo "$line" | sed -E 's#^e: (file://)?[^ ]+ (.*)#\2#')
+            echo "::error file=${f#$GITHUB_WORKSPACE/},line=$l::$m"
+          done
 
       - name: Preparar APK
         run: cp app/build/outputs/apk/release/app-release.apk Navi.apk
@@ -43,12 +58,58 @@ jobs:
           name: Navi
           path: Navi.apk
 
+  pc:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r pc/requirements.txt pyinstaller
+
+      - name: Testar o agente
+        working-directory: pc
+        run: |
+          python -c "import acoes, json; d = acoes.declarations(); print(len(d), 'acoes'); json.dumps(d)"
+          python -c "import acoes; r = acoes.run('pc_status', {}); print(r); assert r['status'] == 'ok'"
+
+      - name: Gerar NaviPC.exe
+        working-directory: pc
+        run: >
+          pyinstaller --onefile --noconsole --name NaviPC
+          --hidden-import comtypes.stream --hidden-import pystray._win32
+          --collect-submodules pycaw
+          navi_pc.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NaviPC
+          path: pc/dist/NaviPC.exe
+
+  release:
+    if: github.ref == 'refs/heads/main' && always() && needs.android.result == 'success'
+    needs: [android, pc]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+
       - name: Publicar na release "apk" (link fixo)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          files="out/Navi/Navi.apk"
+          [ -f out/NaviPC/NaviPC.exe ] && files="$files out/NaviPC/NaviPC.exe"
           gh release delete apk --yes --cleanup-tag || true
-          gh release create apk Navi.apk \
+          gh release create apk $files \
             --title "Navi (build ${GITHUB_RUN_NUMBER})" \
-            --notes "Baixe o Navi.apk e instale, ou rode o script do Termux." \
+            --notes "Celular: baixe o Navi.apk (ou rode o script do Termux). PC Windows: baixe o NaviPC.exe e abra." \
             --target "${GITHUB_SHA}" --latest

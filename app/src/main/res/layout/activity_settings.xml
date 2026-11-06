@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fitsSystemWindows="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView style="@style/Title" android:text="Ajustes da Navi" android:textSize="28sp" />
+
+        <!-- ================= Cérebro ================= -->
+        <TextView style="@style/Title" android:text="Cérebro (Gemini)" />
+        <TextView style="@style/Hint"
+            android:text="Crie uma chave grátis no Google AI Studio e cole aqui. No plano grátis o Google pode usar as conversas para melhorar os produtos." />
+        <Button android:id="@+id/btnGetKey" style="@style/Btn" android:text="Pegar chave grátis (AI Studio)" />
+        <EditText android:id="@+id/geminiKey" style="@style/Field"
+            android:hint="Chave da Gemini API" android:inputType="textPassword" />
+        <EditText android:id="@+id/geminiModel" style="@style/Field"
+            android:hint="Modelo (padrão: gemini-flash-latest)" android:inputType="text" />
+        <EditText android:id="@+id/userName" style="@style/Field"
+            android:hint="Seu nome" android:inputType="textPersonName" />
+        <CheckBox android:id="@+id/followUp" style="@style/Check"
+            android:text="Continuar ouvindo depois de responder (conversa sem repetir &quot;Navi&quot;)" />
+        <CheckBox android:id="@+id/confirm" style="@style/Check"
+            android:text="Perguntar antes de enviar mensagens, ligar ou desligar o PC" />
+        <Button android:id="@+id/btnTestBrain" style="@style/Btn" android:text="Testar o cérebro" />
+
+        <!-- ================= TV ================= -->
+        <TextView style="@style/Title" android:text="TV Samsung" />
+        <TextView style="@style/Hint"
+            android:text="Com a TV ligada e no mesmo Wi-Fi, toque em Procurar. Na 1ª vez, aceite o pedido que aparece na tela da TV." />
+        <EditText android:id="@+id/tvIp" style="@style/Field"
+            android:hint="IP da TV (ex.: 192.168.0.20)" android:inputType="text" />
+        <LinearLayout style="@style/Row">
+            <Button android:id="@+id/btnFindTv" style="@style/RowBtn" android:text="Procurar TV" />
+            <Button android:id="@+id/btnTestTv" style="@style/RowBtn" android:text="Testar" />
+        </LinearLayout>
+        <CheckBox android:id="@+id/irEnabled" style="@style/Check"
+            android:text="Usar o infravermelho do celular como reserva (ligar a TV, HDMI)" />
+        <TextView android:id="@+id/tvInfo" style="@style/Hint" />
+
+        <!-- ================= PC ================= -->
+        <TextView style="@style/Title" android:text="PC (Windows)" />
+        <TextView style="@style/Hint"
+            android:text="Instale o navi-pc no computador (veja o README). Ele mostra um código de pareamento: coloque aqui." />
+        <EditText android:id="@+id/pcHost" style="@style/Field"
+            android:hint="Endereço do PC (ex.: 192.168.0.15:8765)" android:inputType="text" />
+        <EditText android:id="@+id/pcToken" style="@style/Field"
+            android:hint="Código de pareamento" android:inputType="textVisiblePassword" />
+        <LinearLayout style="@style/Row">
+            <Button android:id="@+id/btnFindPc" style="@style/RowBtn" android:text="Procurar PC" />
+            <Button android:id="@+id/btnTestPc" style="@style/RowBtn" android:text="Parear / testar" />
+        </LinearLayout>
+        <TextView android:id="@+id/pcInfo" style="@style/Hint" />
+
+        <!-- ================= Gmail ================= -->
+        <TextView style="@style/Title" android:text="Gmail" />
+        <TextView style="@style/Hint"
+            android:text="Use uma senha de app (precisa da verificação em duas etapas ligada). Não é a sua senha normal." />
+        <Button android:id="@+id/btnAppPassword" style="@style/Btn" android:text="Criar senha de app do Google" />
+        <EditText android:id="@+id/email" style="@style/Field"
+            android:hint="seuemail@gmail.com" android:inputType="textEmailAddress" />
+        <EditText android:id="@+id/emailPass" style="@style/Field"
+            android:hint="Senha de app (16 letras)" android:inputType="textPassword" />
+        <Button android:id="@+id/btnTestEmail" style="@style/Btn" android:text="Testar Gmail" />
+
+        <!-- ================= Permissões ================= -->
+        <TextView style="@style/Title" android:text="Permissões" />
+        <TextView android:id="@+id/perms" style="@style/Hint" android:lineSpacingExtra="4dp" />
+        <Button android:id="@+id/btnMic" style="@style/Btn" android:text="Microfone, notificações, contatos e ligações" />
+        <Button android:id="@+id/btnNotifAccess" style="@style/Btn" android:text="Acesso às notificações (ler mensagens)" />
+        <Button android:id="@+id/btnAccessibility" style="@style/Btn" android:text="Acessibilidade (enviar WhatsApp sozinha)" />
+        <Button android:id="@+id/btnOverlay" style="@style/Btn" android:text="Sobrepor outros apps" />
+        <Button android:id="@+id/btnBattery" style="@style/Btn" android:text="Tirar da economia de bateria" />
+        <Button android:id="@+id/btnXiaomi" style="@style/Btn" android:text="Xiaomi: permissões extras (pop-up em 2º plano)" />
+        <Button android:id="@+id/btnAutostart" style="@style/Btn" android:text="Xiaomi: inicialização automática" />
+
+        <!-- ================= Palavra de ativação ================= -->
+        <TextView style="@style/Title" android:text="Palavra de ativação" />
+        <EditText android:id="@+id/words" style="@style/Field"
+            android:hint="Palavras que ativam (separadas por vírgula)" android:inputType="text" />
+        <CheckBox android:id="@+id/vibrate" style="@style/Check" android:text="Vibrar quando ouvir &quot;Navi&quot;" />
+        <CheckBox android:id="@+id/ownBrain" style="@style/Check"
+            android:text="A própria Navi responde (desmarque para só abrir o Gemini, como antes)" />
+        <TextView style="@style/Hint" android:text="Se a Navi só abrir o Gemini: como abrir" />
+        <RadioGroup android:id="@+id/mode" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <RadioButton android:id="@+id/modeVoice" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="Assistente padrão" />
+            <RadioButton android:id="@+id/modeAssist" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="Gesto de assistente" />
+            <RadioButton android:id="@+id/modeGemini" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="Abrir o app do Gemini" />
+        </RadioGroup>
+        <EditText android:id="@+id/pause" style="@style/Field"
+            android:hint="Segundos de pausa depois de abrir o Gemini" android:inputType="number" />
+
+        <!-- ================= Memória ================= -->
+        <TextView style="@style/Title" android:text="O que a Navi lembra sobre você" />
+        <TextView android:id="@+id/memories" style="@style/Hint" />
+        <LinearLayout style="@style/Row">
+            <Button android:id="@+id/btnClearMem" style="@style/RowBtn" android:text="Apagar memórias" />
+            <Button android:id="@+id/btnClearChat" style="@style/RowBtn" android:text="Limpar conversa" />
+        </LinearLayout>
+
+        <Button android:id="@+id/save" style="@style/Btn" android:layout_marginTop="20dp"
+            android:text="Salvar ajustes" android:textStyle="bold" />
+    </LinearLayout>
+</ScrollView>

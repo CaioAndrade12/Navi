@@ -1,0 +1,7 @@
+# Tudo é opcional: sem esses pacotes o navi-pc ainda funciona, com menos recursos.
+pycaw              # volume exato
+comtypes           # usado pelo pycaw
+psutil             # uso de CPU/memória
+screen-brightness-control  # brilho de monitores externos
+pystray            # ícone perto do relógio
+Pillow             # ícone e print da tela

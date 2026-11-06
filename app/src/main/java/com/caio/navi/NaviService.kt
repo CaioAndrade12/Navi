@@ -8,10 +8,23 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.speech.SpeechRecognizer
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import org.vosk.Model
@@ -21,13 +34,15 @@ import org.vosk.android.SpeechService
 import org.vosk.android.StorageService
 
 /**
- * Fica escutando a palavra "Navi" o tempo todo, offline, e chama o Gemini quando ouve.
- * Enquanto o Gemini está aberto, solta o microfone para não atrapalhar.
+ * Fica escutando a palavra "Navi" o tempo todo, offline (Vosk).
+ * Quando ouve, solta o microfone, escuta o pedido, pensa (Gemini), responde em voz alta
+ * e continua a conversa por alguns segundos sem precisar repetir "Navi".
  */
 class NaviService : Service(), RecognitionListener {
 
     companion object {
         const val ACTION_STOP = "com.caio.navi.STOP"
+        const val ACTION_TALK = "com.caio.navi.TALK"
         private const val CHANNEL = "navi_listen"
         private const val CHANNEL_ALERT = "navi_alert"
         private const val NOTIF_ID = 1
@@ -37,7 +52,7 @@ class NaviService : Service(), RecognitionListener {
             private set
         @Volatile var status = "Desligada"
             private set
-        var listener: ((String) -> Unit)? = null
+        @Volatile var listener: ((String) -> Unit)? = null
 
         fun start(c: Context) {
             c.startForegroundService(Intent(c, NaviService::class.java))
@@ -45,6 +60,11 @@ class NaviService : Service(), RecognitionListener {
 
         fun stop(c: Context) {
             c.startService(Intent(c, NaviService::class.java).setAction(ACTION_STOP))
+        }
+
+        /** Começa uma conversa agora, sem precisar dizer "Navi". */
+        fun talk(c: Context) {
+            c.startForegroundService(Intent(c, NaviService::class.java).setAction(ACTION_TALK))
         }
 
         fun createChannels(c: Context) {
@@ -78,6 +98,7 @@ class NaviService : Service(), RecognitionListener {
     }
 
     private val handler = Handler(Looper.getMainLooper())
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var model: Model? = null
     private var recognizer: Recognizer? = null
     private var speech: SpeechService? = null
@@ -85,7 +106,18 @@ class NaviService : Service(), RecognitionListener {
     private var lastTrigger = 0L
     private var loading = false
 
+    private var speaker: Speaker? = null
+    private var hearer: Listener? = null
+    private var conversation: Job? = null
+    private var recorderMode = false // reconhecedor do Android falhou: grava e manda o áudio pro Gemini
+
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        speaker = Speaker(this)
+        hearer = Listener(this).also { l -> l.onPartial = { setStatus("Ouvindo: $it") } }
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
@@ -107,17 +139,25 @@ class NaviService : Service(), RecognitionListener {
         }
         getSystemService(NotificationManager::class.java).cancel(NOTIF_TAP_ID)
 
+        words = Prefs.words(this)
         if (!running) {
             running = true
-            words = Prefs.words(this)
             loadModelAndListen()
-        } else {
+            refreshPcToolsQuietly()
+        } else if (model != null && conversation?.isActive != true) {
             // Ajustes podem ter mudado: reinicia a escuta com as palavras novas.
-            words = Prefs.words(this)
-            if (model != null) restartListening(0)
+            restartListening(0)
         }
+        if (intent?.action == ACTION_TALK) startConversation()
         return START_STICKY
     }
+
+    private fun refreshPcToolsQuietly() {
+        if (Prefs.pcHost(this).isEmpty()) return
+        scope.launch(Dispatchers.IO) { try { PcClient.refreshTools(this@NaviService) } catch (_: Exception) {} }
+    }
+
+    // ---------------- Palavra de ativação (Vosk) ----------------
 
     private fun loadModelAndListen() {
         if (model != null) { startListening(); return }
@@ -138,7 +178,7 @@ class NaviService : Service(), RecognitionListener {
 
     private fun startListening() {
         val m = model ?: return
-        if (speech != null) return
+        if (speech != null || conversation?.isActive == true) return
         try {
             val grammar = JSONArray(words + "[unk]").toString()
             val rec = Recognizer(m, 16000f, grammar)
@@ -176,20 +216,99 @@ class NaviService : Service(), RecognitionListener {
 
     private fun trigger() {
         val now = SystemClock.elapsedRealtime()
-        if (now - lastTrigger < 3000) return
+        if (now - lastTrigger < 2500) return
         lastTrigger = now
 
-        val pause = Prefs.pauseSec(this)
-        // Solta o microfone para o Gemini poder escutar.
-        handler.removeCallbacksAndMessages(null)
-        stopListening()
-        Prefs.logEvent(this, "ouvi \"Navi\" e chamei o assistente")
-        setStatus("Chamei o Gemini! Volto a escutar em ${pause}s.")
-        AssistLauncher.launchFromBackground(this)
-        handler.postDelayed({ if (running) startListening() }, pause * 1000L)
+        if (!Prefs.ownBrain(this) || Prefs.geminiKey(this).isEmpty()) {
+            // Modo antigo (ou sem chave do Gemini): abre o assistente do Google.
+            val pause = Prefs.pauseSec(this)
+            handler.removeCallbacksAndMessages(null)
+            stopListening()
+            Prefs.logEvent(this, "ouvi \"Navi\" e chamei o Gemini")
+            setStatus("Chamei o Gemini! Volto a escutar em ${pause}s.")
+            AssistLauncher.launchFromBackground(this)
+            handler.postDelayed({ if (running) startListening() }, pause * 1000L)
+            return
+        }
+        startConversation()
     }
 
-    // ---- RecognitionListener ----
+    // ---------------- Conversa ----------------
+
+    private fun startConversation() {
+        if (conversation?.isActive == true) return
+        if (Prefs.geminiKey(this).isEmpty()) {
+            setStatus("Falta a chave do Gemini nos ajustes.")
+            return
+        }
+        handler.removeCallbacksAndMessages(null)
+        stopListening()
+        Prefs.logEvent(this, "conversa iniciada")
+        conversation = scope.launch {
+            try {
+                delay(250) // dá tempo do microfone ser liberado
+                beep()
+                var turns = 0
+                while (running && turns < 12) {
+                    turns++
+                    setStatus("Ouvindo...")
+                    val (text, audio) = hear() ?: break
+                    NaviCore.add(true, text ?: "🎤 (áudio)")
+                    setStatus("Pensando...")
+                    val reply = NaviCore.brain(this@NaviService).handle(text, audio)
+                    NaviCore.add(false, reply.text)
+                    setStatus("Falando...")
+                    speaker?.speak(reply.text)
+                    val brain = NaviCore.brain(this@NaviService)
+                    if (!(Prefs.followUp(this@NaviService) || reply.expectReply || brain.hasPendingQuestion())) break
+                    delay(150)
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                setStatus("Erro na conversa: ${e.message}")
+            } finally {
+                withContext(kotlinx.coroutines.NonCancellable) {
+                    conversation = null
+                    if (running) {
+                        delay(300)
+                        startListening()
+                    }
+                }
+            }
+        }
+    }
+
+    /** Escuta uma fala. Devolve (texto, áudio) ou null se a pessoa não falou nada. */
+    private suspend fun hear(): Pair<String?, ByteArray?>? {
+        if (!recorderMode) {
+            val h = hearer?.listen() ?: Heard(null, SpeechRecognizer.ERROR_CLIENT)
+            if (!h.text.isNullOrBlank()) return h.text to null
+            if (h.silent) return null
+            // O reconhecedor do celular não funcionou: passa a gravar o áudio e mandar pro Gemini.
+            recorderMode = true
+            hearer?.destroy()
+            delay(200)
+        }
+        val wav = withContext(Dispatchers.IO) { VoiceRecorder.record() } ?: return null
+        return null to wav
+    }
+
+    private fun beep() {
+        if (Prefs.vibrate(this)) {
+            try {
+                getSystemService(Vibrator::class.java)
+                    ?.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+            } catch (_: Exception) {}
+        }
+        try {
+            val tg = ToneGenerator(AudioManager.STREAM_MUSIC, 45)
+            tg.startTone(ToneGenerator.TONE_PROP_ACK, 120)
+            handler.postDelayed({ tg.release() }, 400)
+        } catch (_: Exception) {}
+    }
+
+    // ---- RecognitionListener (Vosk) ----
     override fun onPartialResult(hypothesis: String?) {
         if (hypothesis != null && heard(hypothesis, "partial")) trigger()
     }
@@ -219,12 +338,17 @@ class NaviService : Service(), RecognitionListener {
             this, 1, Intent(this, NaviService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+        val talk = PendingIntent.getService(
+            this, 2, Intent(this, NaviService::class.java).setAction(ACTION_TALK),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
         return Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_sparkle)
             .setContentTitle("Navi")
             .setContentText(text)
             .setContentIntent(open)
             .setOngoing(true)
+            .addAction(Notification.Action.Builder(null, "Falar", talk).build())
             .addAction(Notification.Action.Builder(null, "Desligar", stop).build())
             .build()
     }
@@ -242,8 +366,12 @@ class NaviService : Service(), RecognitionListener {
 
     override fun onDestroy() {
         running = false
+        conversation?.cancel()
+        scope.cancel()
         handler.removeCallbacksAndMessages(null)
         stopListening()
+        speaker?.shutdown()
+        hearer?.destroy()
         if (!loading) {
             try { model?.close() } catch (_: Exception) {}
             model = null
