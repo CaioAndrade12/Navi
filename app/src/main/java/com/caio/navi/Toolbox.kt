@@ -106,22 +106,17 @@ object Toolbox {
                 else -> {
                     // 1) Pela faixa de fontes, na rede de casa (o jeito que essa TV sempre obedece).
                     val local = try { SamsungTv.sourceByMenu(c, e) } catch (_: Exception) { false }
-                    // 2) Confere pela SmartThings (se tiver) e, se não trocou, tenta por ela.
-                    if (SmartThings.configured(c)) {
-                        if (local) kotlinx.coroutines.delay(2500)
-                        val now = if (local) SmartThings.currentInput(c) else null
-                        if (now != null && now.uppercase().replace(" ", "") == e) ok("Pronto, a TV está no $nome.")
-                        else try {
+                    if (local) {
+                        ok("Mudei para o $nome pela faixa de fontes.")
+                            .put("dica", "Se caiu na entrada errada, a ordem das fontes pode ser outra: pergunte a ordem e use tv_ordem_fontes.")
+                    } else if (SmartThings.configured(c)) {
+                        // 2) Rede não respondeu: nuvem, só porque a TV está online nela.
+                        try {
                             SmartThings.setInputChecked(c, e)
                             ok("Pronto, a TV está no $nome.")
                         } catch (ex: Exception) {
-                            if (local) ok("Mudei para o $nome pela faixa de fontes.")
-                                .put("dica", "Se caiu na entrada errada, a ordem das fontes pode ser outra: pergunte a ordem e use tv_ordem_fontes.")
-                            else fail("Não consegui trocar a entrada: ${ex.message}")
+                            fail("Não consegui trocar a entrada: ${ex.message}")
                         }
-                    } else if (local) {
-                        ok("Mudei para o $nome pela faixa de fontes.")
-                            .put("dica", "Se caiu na entrada errada, a ordem das fontes pode ser outra: pergunte a ordem e use tv_ordem_fontes.")
                     } else fail("Não consegui falar com a TV pela rede. Ela está ligada?")
                 }
             }

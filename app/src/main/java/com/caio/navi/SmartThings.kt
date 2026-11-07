@@ -23,7 +23,45 @@ object SmartThings {
     private val http = OkHttpClient.Builder()
         .connectTimeout(6, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS).build()
 
-    fun configured(c: Context) = Prefs.stToken(c).isNotEmpty()
+    /** Só tem token salvo (não quer dizer que a TV está ligada na nuvem). */
+    fun hasToken(c: Context) = Prefs.stToken(c).isNotEmpty()
+
+    @Volatile private var onlineAt = 0L
+    @Volatile private var online = false
+
+    /**
+     * A TV está mesmo conectada à nuvem agora? A SmartThings aceita comandos e mostra valores
+     * antigos mesmo com a TV desconectada, então sem isso ela "faz" coisas que nunca chegam na TV.
+     */
+    fun configured(c: Context): Boolean {
+        if (!hasToken(c)) return false
+        val now = System.currentTimeMillis()
+        if (now - onlineAt < 60_000L) return online
+        online = try {
+            health(c) == "ONLINE"
+        } catch (_: Exception) {
+            false
+        }
+        onlineAt = now
+        return online
+    }
+
+    /** ONLINE / OFFLINE, como a própria SmartThings vê a TV. */
+    fun health(c: Context): String {
+        val id = Prefs.stDevice(c).ifEmpty { kotlinx.coroutines.runBlocking { findTv(c).first } }
+        return call(c, "GET", "/devices/$id/health").optString("state", "UNKNOWN")
+    }
+
+    /** Há quanto tempo a TV mandou o volume para a nuvem (em minutos), ou null. */
+    suspend fun volumeAgeMinutes(c: Context): Long? = try {
+        val ts = status(c).optJSONObject("audioVolume")?.optJSONObject("volume")?.optString("timestamp").orEmpty()
+        if (ts.isEmpty()) null else {
+            val t = java.time.Instant.parse(ts).toEpochMilli()
+            (System.currentTimeMillis() - t) / 60_000L
+        }
+    } catch (_: Exception) {
+        null
+    }
 
     private fun call(c: Context, method: String, path: String, body: JSONObject? = null): JSONObject {
         val token = Prefs.stToken(c)

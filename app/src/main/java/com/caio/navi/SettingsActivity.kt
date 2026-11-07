@@ -56,9 +56,19 @@ class SettingsActivity : Activity() {
         btn(R.id.btnTestSt) {
             busy("Procurando a TV na SmartThings") {
                 val (_, name) = SmartThings.findTv(this@SettingsActivity)
-                val vol = SmartThings.volume(this@SettingsActivity)
-                "Achei a TV \"$name\" na SmartThings." + (if (vol != null) " Volume agora: $vol." else "")
-            }
+                val state = withContext(Dispatchers.IO) { SmartThings.health(this@SettingsActivity) }
+                val age = SmartThings.volumeAgeMinutes(this@SettingsActivity)
+                val idade = when {
+                    age == null -> ""
+                    age < 2 -> " A última notícia dela chegou agora há pouco."
+                    age < 120 -> " A última notícia dela chegou há $age minutos."
+                    else -> " A última notícia dela chegou há ${age / 60} horas."
+                }
+                if (state == "ONLINE") "✅ A TV \"$name\" está conectada à SmartThings agora.$idade A Navi vai usar a nuvem como reserva."
+                else "⚠️ A conta acha a TV \"$name\", mas ela está $state na SmartThings, então os comandos pela nuvem não " +
+                    "chegam nela.$idade A Navi não vai usar a SmartThings enquanto isso. Para conectar: na TV, entre na " +
+                    "conta Samsung e ative Geral > Gerenciador de dispositivos externos > Conectar celular / SmartThings, " +
+                    "e deixe a TV conectada ao Wi-Fi."            }
         }
         btn(R.id.btnFindPc) { findPc() }
         btn(R.id.btnPairPc) { pairPc() }
@@ -374,7 +384,7 @@ class SettingsActivity : Activity() {
             appendLine("${mark(getSystemService(android.app.NotificationManager::class.java).isNotificationPolicyAccessGranted)}  Não perturbe (modo silencioso)")
             appendLine("${mark(Settings.canDrawOverlays(this@SettingsActivity))}  Sobrepor outros apps")
             appendLine("${mark(pm.isIgnoringBatteryOptimizations(packageName))}  Sem restrição de bateria")
-            append("${mark(SmartThings.configured(this@SettingsActivity))}  SmartThings (segunda via da TV)")
+            append("${mark(SmartThings.hasToken(this@SettingsActivity))}  SmartThings com token (veja se a TV está online no Testar SmartThings)")
         }
         val tvIp = Prefs.tvIp(this)
         findViewById<TextView>(R.id.tvInfo).text = when {
