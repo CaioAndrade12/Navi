@@ -30,8 +30,6 @@ object Llm {
         "groq" to Preset("Groq", "https://api.groq.com/openai/v1",
             listOf("openai/gpt-oss-120b", "llama-3.3-70b-versatile"), "https://console.groq.com/keys",
             "rapidíssimo, também entende áudio"),
-        "cerebras" to Preset("Cerebras", "https://api.cerebras.ai/v1", listOf("gpt-oss-120b"),
-            "https://cloud.cerebras.ai", "recomendado: rápido e com bastante uso grátis"),
         "openrouter" to Preset("OpenRouter", "https://openrouter.ai/api/v1", listOf("openrouter/free"),
             "https://openrouter.ai/settings/keys", "escolhe sozinho entre vários modelos grátis"),
         "mistral" to Preset("Mistral", "https://api.mistral.ai/v1", listOf("mistral-small-latest"),
@@ -39,7 +37,7 @@ object Llm {
     )
 
     /** Opções para o terceiro cérebro (o segundo é sempre o Groq). */
-    val THIRD = listOf("cerebras", "openrouter", "mistral")
+    val THIRD = listOf("openrouter", "mistral")
 
     /** [id] = provedor (groq, cerebras...); [slot] = provedor + número da chave, para pausar cada chave separada. */
     private class Backup(val id: String, val label: String, val base: String, val key: String, val models: List<String>,
@@ -74,6 +72,72 @@ object Llm {
     }
 
     fun hasBackups(c: Context) = backups(c).isNotEmpty()
+
+    // ------------------------------------------------------------------ modelos do Gemini
+
+    /** Se a lista da chave não puder ser lida: os apelidos "mais recente" do Google, do melhor ao mais leve. */
+    private val GEMINI_DEFAULTS = listOf("gemini-flash-latest", "gemini-flash-lite-latest", "gemini-pro-latest")
+    @Volatile private var geminiList: List<String> = emptyList()
+    @Volatile private var geminiListAt = 0L
+
+    /**
+     * Modelos que a chave pode usar, do melhor para o pior pensando em uma assistente de voz:
+     * Flash mais novo primeiro (rápido e esperto), depois Flash-Lite, e o Pro só no fim (lento e com
+     * pouca cota grátis). A lista vem do próprio Gemini e é atualizada uma vez por dia.
+     */
+    fun geminiModels(c: Context): List<String> {
+        val now = System.currentTimeMillis()
+        if (geminiList.isNotEmpty() && now - geminiListAt < 24 * 3_600_000L) return geminiList
+        val key = Prefs.geminiKey(c)
+        val found = if (key.isEmpty()) emptyList() else try {
+            val req = Request.Builder()
+                .url("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200")
+                .header("x-goog-api-key", key).build()
+            quick.newCall(req).execute().use { r ->
+                if (!r.isSuccessful) emptyList() else {
+                    val arr = JSONObject(r.body?.string().orEmpty()).optJSONArray("models") ?: JSONArray()
+                    (0 until arr.length()).mapNotNull { i ->
+                        val m = arr.getJSONObject(i)
+                        val methods = m.optJSONArray("supportedGenerationMethods")?.toString().orEmpty()
+                        val name = m.optString("name").removePrefix("models/")
+                        name.takeIf { "generateContent" in methods }
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val bad = Regex("preview|exp|tts|image|live|audio|embedding|vision|learnlm|gemma|aqa|robotics|computer|nano|thinking")
+        val ranked = found.filter { it.startsWith("gemini-") && !bad.containsMatchIn(it) }
+            .mapNotNull { name ->
+                val m = Regex("gemini-(\\d+(?:\\.\\d+)?)-(flash|pro)(-lite)?(?:-(\\d+|latest))?$").find(name)
+                if (m == null) {
+                    // apelidos "gemini-flash-latest" etc.
+                    when (name) {
+                        "gemini-flash-latest" -> name to 1000.0
+                        "gemini-flash-lite-latest" -> name to 500.0
+                        "gemini-pro-latest" -> name to 10.0
+                        else -> null
+                    }
+                } else {
+                    val version = m.groupValues[1].toDoubleOrNull() ?: 0.0
+                    val family = when {
+                        m.groupValues[2] == "flash" && m.groupValues[3].isEmpty() -> 600.0
+                        m.groupValues[2] == "flash" -> 300.0
+                        else -> 0.0 // pro
+                    }
+                    name to family + version * 10
+                }
+            }
+            .sortedByDescending { it.second }.map { it.first }.distinct()
+        val list = ranked.ifEmpty { GEMINI_DEFAULTS }
+        geminiList = list
+        geminiListAt = if (ranked.isEmpty()) now - 23 * 3_600_000L else now // sem lista: tenta de novo em 1 h
+        return list
+    }
+
+    /** Os primeiros modelos da lista (para não ficar testando dezenas quando todos estão sem cota). */
+    private fun geminiTop(c: Context) = geminiModels(c).take(5)
 
     /**
      * Abre a conexão com o cérebro enquanto a pessoa ainda está falando: com internet ruim, só
@@ -174,7 +238,7 @@ object Llm {
         val slots = mutableListOf<Pair<String, () -> JSONObject>>()
         // Cada chave do Gemini (modelo principal e o Lite) antes de ir para os outros provedores.
         geminiKeys.forEachIndexed { i, key ->
-            for (model in listOf(Prefs.geminiModel(c), Prefs.FALLBACK_MODEL).distinct()) {
+            for (model in geminiTop(c)) {
                 val more = backups.isNotEmpty() || geminiKeys.size > 1
                 slots += "gemini#${i + 1}:$model" to { geminiChat(key, model, system, history, tools, more, thinking) }
             }
@@ -461,7 +525,7 @@ object Llm {
             }
         }
         Prefs.geminiKeys(c).forEachIndexed { i, key ->
-            for (model in listOf(Prefs.geminiModel(c), Prefs.FALLBACK_MODEL).distinct()) {
+            for (model in geminiTop(c)) {
                 val slot = "gemini#${i + 1}:$model"
                 if (paused(slot)) continue
                 try {
@@ -541,7 +605,7 @@ object Llm {
     /** Pesquisa: Google pelo Gemini; se ele estiver fora, trechos do DuckDuckGo para o cérebro resumir. */
     fun webSearch(c: Context, query: String): JSONObject {
         Prefs.geminiKeys(c).forEachIndexed { i, key ->
-            for (model in listOf(Prefs.geminiModel(c), Prefs.FALLBACK_MODEL).distinct()) {
+            for (model in geminiTop(c)) {
                 val slot = "gemini-busca#${i + 1}:$model"
                 if (paused(slot)) continue
                 try {
@@ -594,7 +658,7 @@ object Llm {
         val geminiKeys = Prefs.geminiKeys(c)
         if (geminiKeys.isEmpty()) lines += "⚪ Gemini: sem chave"
         geminiKeys.forEachIndexed { i, key ->
-            val model = Prefs.geminiModel(c)
+            val model = geminiModels(c).firstOrNull { !paused("gemini#${i + 1}:$it") } ?: geminiModels(c).first()
             val name = if (geminiKeys.size > 1) "Gemini chave ${i + 1}" else "Gemini"
             val t0 = System.currentTimeMillis()
             lines += try {

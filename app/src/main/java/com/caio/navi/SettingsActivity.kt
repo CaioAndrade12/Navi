@@ -46,8 +46,7 @@ class SettingsActivity : Activity() {
         btn(R.id.btnAppPassword) { open(Intent(Intent.ACTION_VIEW, Uri.parse("https://myaccount.google.com/apppasswords"))) }
         btn(R.id.btnTestBrain) { testBrain() }
         btn(R.id.btnGroqKey) { open(Intent(Intent.ACTION_VIEW, Uri.parse(Llm.PRESETS.getValue("groq").keyUrl))) }
-        for ((id, button) in listOf("cerebras" to R.id.btnCerebrasKey, "openrouter" to R.id.btnOpenrouterKey,
-            "mistral" to R.id.btnMistralKey)) {
+        for ((id, button) in listOf("openrouter" to R.id.btnOpenrouterKey, "mistral" to R.id.btnMistralKey)) {
             btn(button) { open(Intent(Intent.ACTION_VIEW, Uri.parse(Llm.PRESETS.getValue(id).keyUrl))) }
         }
         btn(R.id.btnTestBrains) { busy("Testando os cérebros") { withContext(Dispatchers.IO) { Llm.testAll(this@SettingsActivity) } } }
@@ -166,7 +165,6 @@ class SettingsActivity : Activity() {
 
     private fun load() {
         et(R.id.geminiKey).setText(Prefs.geminiKeysRaw(this))
-        et(R.id.geminiModel).setText(Prefs.geminiModel(this))
         et(R.id.userName).setText(Prefs.userName(this))
         sw(R.id.followUp).isChecked = Prefs.followUp(this)
         sw(R.id.confirm).isChecked = Prefs.confirmActions(this)
@@ -199,13 +197,11 @@ class SettingsActivity : Activity() {
         fillRadios(R.id.endSound, Sounds.END_OPTIONS, Prefs.endSound(this))
     }
 
-    private val KEY_FIELDS = listOf("groq" to R.id.groqKey, "cerebras" to R.id.cerebrasKey,
-        "openrouter" to R.id.openrouterKey, "mistral" to R.id.mistralKey)
+    private val KEY_FIELDS = listOf("groq" to R.id.groqKey, "openrouter" to R.id.openrouterKey, "mistral" to R.id.mistralKey)
 
     private fun save() {
         for ((id, field) in KEY_FIELDS) Prefs.setProviderKey(this, id, et(field).text.toString())
         Prefs.setGeminiKey(this, et(R.id.geminiKey).text.toString())
-        Prefs.setGeminiModel(this, et(R.id.geminiModel).text.toString().ifBlank { Prefs.DEFAULT_MODEL })
         Prefs.setUserName(this, et(R.id.userName).text.toString())
         Prefs.setFollowUp(this, sw(R.id.followUp).isChecked)
         Prefs.setConfirmActions(this, sw(R.id.confirm).isChecked)
@@ -268,7 +264,7 @@ class SettingsActivity : Activity() {
         withContext(Dispatchers.IO) {
             val body = JSONObject().put("contents", JSONArray().put(
                 Gemini.userText("Responda só com uma frase curta e simpática em português: diga que a Navi está funcionando.")))
-            val resp = Gemini.generate(Prefs.geminiKey(this@SettingsActivity), Prefs.geminiModel(this@SettingsActivity), body)
+            val resp = Gemini.generate(Prefs.geminiKey(this@SettingsActivity), Llm.geminiModels(this@SettingsActivity).first(), body)
             "Funcionou! O Gemini respondeu:\n\n" + Gemini.textOf(Gemini.firstContent(resp))
         }
     }

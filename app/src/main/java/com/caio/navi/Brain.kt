@@ -421,6 +421,8 @@ class Brain(private val ctx: Context) {
         e.code == 429 && Llm.hasBackups(ctx) -> "Todos os meus cérebros estão no limite de uso agora. Tenta de novo daqui a pouco."
         e.code == 429 -> "Atingi o limite de uso do Gemini por agora. Tenta de novo daqui a pouco, ou cadastre um cérebro reserva nos ajustes."
         e.code == -1 -> "Estou sem internet para pensar agora."
+        e.code == 503 || e.message.orEmpty().contains("overloaded", true) || e.message.orEmpty().contains("high demand", true) ->
+            "Os servidores de IA estão sobrecarregados agora. Tenta de novo em alguns segundos."
         e.message.orEmpty().contains("Falta a chave") -> e.message.orEmpty()
         else -> "O cérebro deu erro: ${e.message.orEmpty().take(120)}"
     }
