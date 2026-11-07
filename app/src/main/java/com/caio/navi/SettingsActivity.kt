@@ -46,9 +46,9 @@ class SettingsActivity : Activity() {
         btn(R.id.btnAppPassword) { open(Intent(Intent.ACTION_VIEW, Uri.parse("https://myaccount.google.com/apppasswords"))) }
         btn(R.id.btnTestBrain) { testBrain() }
         btn(R.id.btnGroqKey) { open(Intent(Intent.ACTION_VIEW, Uri.parse(Llm.PRESETS.getValue("groq").keyUrl))) }
-        btn(R.id.btnThirdKey) {
-            val p = Llm.PRESETS[shownThird] ?: Llm.PRESETS.getValue("cerebras")
-            open(Intent(Intent.ACTION_VIEW, Uri.parse(p.keyUrl)))
+        for ((id, button) in listOf("cerebras" to R.id.btnCerebrasKey, "openrouter" to R.id.btnOpenrouterKey,
+            "mistral" to R.id.btnMistralKey)) {
+            btn(button) { open(Intent(Intent.ACTION_VIEW, Uri.parse(Llm.PRESETS.getValue(id).keyUrl))) }
         }
         btn(R.id.btnTestBrains) { busy("Testando os cérebros") { withContext(Dispatchers.IO) { Llm.testAll(this@SettingsActivity) } } }
         btn(R.id.btnFindTv) { findTv() }
@@ -165,7 +165,7 @@ class SettingsActivity : Activity() {
     }
 
     private fun load() {
-        et(R.id.geminiKey).setText(Prefs.geminiKey(this))
+        et(R.id.geminiKey).setText(Prefs.geminiKeysRaw(this))
         et(R.id.geminiModel).setText(Prefs.geminiModel(this))
         et(R.id.userName).setText(Prefs.userName(this))
         sw(R.id.followUp).isChecked = Prefs.followUp(this)
@@ -190,20 +190,7 @@ class SettingsActivity : Activity() {
         val players = linkedMapOf("" to "Automático (o primeiro instalado)")
         MediaControl.installed(this).forEach { players[it.pkg] = it.label }
         fillRadios(R.id.musicApps, players, Prefs.musicApp(this))
-        et(R.id.groqKey).setText(Prefs.providerKey(this, "groq"))
-        val third = findViewById<RadioGroup>(R.id.thirdProvider)
-        third.setOnCheckedChangeListener(null)
-        fillRadios(R.id.thirdProvider,
-            Llm.THIRD.associateWith { id -> Llm.PRESETS.getValue(id).let { "${it.label} — ${it.about}" } },
-            Prefs.thirdProvider(this))
-        showThird(checkedKey(R.id.thirdProvider) ?: Prefs.thirdProvider(this))
-        third.setOnCheckedChangeListener { _, _ ->
-            saveThird()
-            checkedKey(R.id.thirdProvider)?.let { id ->
-                Prefs.setThirdProvider(this, id)
-                showThird(id)
-            }
-        }
+        for ((id, field) in KEY_FIELDS) et(field).setText(Prefs.providerKeysRaw(this, id))
         findViewById<android.widget.TextView>(R.id.brainsInfo).text = Llm.status()
         findViewById<RadioGroup>(R.id.wakeSens).check(
             when (Prefs.wakeSensitivity(this)) { 0 -> R.id.sensLow; 2 -> R.id.sensHigh; else -> R.id.sensNormal })
@@ -212,28 +199,11 @@ class SettingsActivity : Activity() {
         fillRadios(R.id.endSound, Sounds.END_OPTIONS, Prefs.endSound(this))
     }
 
-    /** Qual terceiro cérebro os campos de chave/modelo estão mostrando agora. */
-    private var shownThird = ""
-
-    private fun showThird(id: String) {
-        shownThird = id
-        val p = Llm.PRESETS[id] ?: return
-        et(R.id.thirdKey).setText(Prefs.providerKey(this, id))
-        et(R.id.thirdKey).hint = "Chave do ${p.label}"
-        et(R.id.thirdModel).setText(Prefs.providerModel(this, id))
-        et(R.id.thirdModel).hint = "Modelo (vazio = ${p.models.first()})"
-        findViewById<Button>(R.id.btnThirdKey).text = "Pegar chave grátis do ${p.label}"
-    }
-
-    private fun saveThird() {
-        if (shownThird.isEmpty()) return
-        Prefs.setProviderKey(this, shownThird, et(R.id.thirdKey).text.toString())
-        Prefs.setProviderModel(this, shownThird, et(R.id.thirdModel).text.toString())
-    }
+    private val KEY_FIELDS = listOf("groq" to R.id.groqKey, "cerebras" to R.id.cerebrasKey,
+        "openrouter" to R.id.openrouterKey, "mistral" to R.id.mistralKey)
 
     private fun save() {
-        Prefs.setProviderKey(this, "groq", et(R.id.groqKey).text.toString())
-        saveThird()
+        for ((id, field) in KEY_FIELDS) Prefs.setProviderKey(this, id, et(field).text.toString())
         Prefs.setGeminiKey(this, et(R.id.geminiKey).text.toString())
         Prefs.setGeminiModel(this, et(R.id.geminiModel).text.toString().ifBlank { Prefs.DEFAULT_MODEL })
         Prefs.setUserName(this, et(R.id.userName).text.toString())

@@ -69,7 +69,11 @@ object Prefs {
     }
 
     // ---- Cérebro (Gemini API) ----
-    fun geminiKey(c: Context) = secret(c, "gemini_key").trim()
+    /** Várias chaves no mesmo campo (separadas por vírgula, espaço ou linha): cada uma tem sua cota. */
+    fun splitKeys(raw: String) = raw.split(Regex("[,;\\s]+")).map { it.trim() }.filter { it.length >= 8 }.distinct()
+    fun geminiKeysRaw(c: Context) = secret(c, "gemini_key").trim()
+    fun geminiKeys(c: Context) = splitKeys(geminiKeysRaw(c))
+    fun geminiKey(c: Context) = geminiKeys(c).firstOrNull().orEmpty()
     fun setGeminiKey(c: Context, v: String) = putSecret(c, "gemini_key", v.trim())
     fun geminiModel(c: Context) = str(c, "gemini_model", DEFAULT_MODEL).trim().ifEmpty { DEFAULT_MODEL }
     fun setGeminiModel(c: Context, v: String) = put(c, "gemini_model", v.trim())
@@ -78,7 +82,9 @@ object Prefs {
 
     // ---- Cérebros reserva (Llm.PRESETS: groq, cerebras, openrouter, mistral) ----
     /** Chave de cada provedor, guardada criptografada. */
-    fun providerKey(c: Context, id: String) = secret(c, "key_$id").trim()
+    fun providerKeysRaw(c: Context, id: String) = secret(c, "key_$id").trim()
+    fun providerKeys(c: Context, id: String) = splitKeys(providerKeysRaw(c, id))
+    fun providerKey(c: Context, id: String) = providerKeys(c, id).firstOrNull().orEmpty()
     fun setProviderKey(c: Context, id: String, v: String) = putSecret(c, "key_$id", v.trim())
     /** Modelo escolhido para o provedor (vazio = o padrão do app). */
     fun providerModel(c: Context, id: String) = str(c, "model_$id").trim()

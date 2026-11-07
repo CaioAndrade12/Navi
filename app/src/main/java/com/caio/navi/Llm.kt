@@ -41,7 +41,9 @@ object Llm {
     /** Opções para o terceiro cérebro (o segundo é sempre o Groq). */
     val THIRD = listOf("cerebras", "openrouter", "mistral")
 
-    private class Backup(val id: String, val label: String, val base: String, val key: String, val models: List<String>)
+    /** [id] = provedor (groq, cerebras...); [slot] = provedor + número da chave, para pausar cada chave separada. */
+    private class Backup(val id: String, val label: String, val base: String, val key: String, val models: List<String>,
+                         val slot: String = id)
 
     private const val SKIP_SIGNATURE = "skip_thought_signature_validator"
     private const val UA = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
@@ -57,20 +59,16 @@ object Llm {
     /** Com reservas cadastrados não vale esperar 90 s por um Gemini travado. */
     private val quick: OkHttpClient by lazy { Gemini.http.newBuilder().readTimeout(30, TimeUnit.SECONDS).build() }
 
+    /** Todos os reservas com chave, na ordem: Groq, Cerebras, OpenRouter, Mistral (cada chave vira uma opção). */
     private fun backups(c: Context): List<Backup> {
         val out = mutableListOf<Backup>()
-        val groq = Prefs.providerKey(c, "groq")
-        if (groq.isNotEmpty()) {
-            val p = PRESETS.getValue("groq")
-            val custom = Prefs.providerModel(c, "groq")
-            out += Backup("groq", p.label, p.base, groq, if (custom.isNotEmpty()) listOf(custom) else p.models)
-        }
-        val third = Prefs.thirdProvider(c)
-        val thirdKey = Prefs.providerKey(c, third)
-        val p = PRESETS[third]
-        if (p != null && thirdKey.isNotEmpty() && third != "groq") {
-            val custom = Prefs.providerModel(c, third)
-            out += Backup(third, p.label, p.base, thirdKey, if (custom.isNotEmpty()) listOf(custom) else p.models)
+        for ((id, p) in PRESETS) {
+            val keys = Prefs.providerKeys(c, id)
+            val custom = Prefs.providerModel(c, id)
+            keys.forEachIndexed { i, key ->
+                val label = if (keys.size > 1) "${p.label} chave ${i + 1}" else p.label
+                out += Backup(id, label, p.base, key, if (custom.isNotEmpty()) listOf(custom) else p.models, "$id#${i + 1}")
+            }
         }
         return out
     }
@@ -144,8 +142,10 @@ object Llm {
     private fun label(slot: String): String {
         val id = slot.substringBefore(":")
         val model = slot.substringAfter(":")
-        val name = if (id.startsWith("gemini")) "Gemini" else PRESETS[id]?.label ?: id
-        return "$name ($model)"
+        val provider = id.substringBefore("#")
+        val n = id.substringAfter("#", "")
+        val name = if (provider.startsWith("gemini")) "Gemini" else PRESETS[provider]?.label ?: provider
+        return "$name${if (n.isNotEmpty() && n != "1") " chave $n" else ""} ($model)"
     }
 
     /** Texto para os ajustes: quem respondeu por último e quem está em pausa. */
@@ -170,15 +170,17 @@ object Llm {
         lightTools: List<Tool> = tools, thinking: String = "low",
     ): JSONObject {
         val backups = backups(c)
-        val geminiKey = Prefs.geminiKey(c)
+        val geminiKeys = Prefs.geminiKeys(c)
         val slots = mutableListOf<Pair<String, () -> JSONObject>>()
-        if (geminiKey.isNotEmpty()) {
+        // Cada chave do Gemini (modelo principal e o Lite) antes de ir para os outros provedores.
+        geminiKeys.forEachIndexed { i, key ->
             for (model in listOf(Prefs.geminiModel(c), Prefs.FALLBACK_MODEL).distinct()) {
-                slots += "gemini:$model" to { geminiChat(geminiKey, model, system, history, tools, backups.isNotEmpty(), thinking) }
+                val more = backups.isNotEmpty() || geminiKeys.size > 1
+                slots += "gemini#${i + 1}:$model" to { geminiChat(key, model, system, history, tools, more, thinking) }
             }
         }
         for (b in backups) for (model in b.models) {
-            slots += "${b.id}:$model" to { openAiChat(c, b, model, system, history, lightTools, thinking) }
+            slots += "${b.slot}:$model" to { openAiChat(c, b, model, system, history, lightTools, thinking) }
         }
         if (slots.isEmpty()) throw GeminiException("Falta a chave da Gemini API nos ajustes.", 401)
 
@@ -186,7 +188,7 @@ object Llm {
         var tried = 0
         var skipGemini = false
         for ((slot, call) in slots) {
-            if (paused(slot) || (skipGemini && slot.startsWith("gemini:"))) continue
+            if (paused(slot) || (skipGemini && slot.startsWith("gemini#"))) continue
             tried++
             try {
                 return call().also { lastUsed = label(slot) }
@@ -194,7 +196,7 @@ object Llm {
                 errors += e
                 pause(slot, e)
                 // Pedido recusado (400): o outro modelo do Gemini recusaria igual; vai direto aos reservas.
-                if (slot.startsWith("gemini:") && e.code == 400) skipGemini = true
+                if (slot.startsWith("gemini#") && e.code == 400) skipGemini = true
             }
         }
         if (tried == 0) {
@@ -448,18 +450,19 @@ object Llm {
 
     /** Transcreve uma fala (Whisper do Groq, rápido e grátis; senão o Gemini). null = ninguém conseguiu. */
     fun transcribe(c: Context, wav: ByteArray): String? {
-        val groqKey = Prefs.providerKey(c, "groq")
-        if (groqKey.isNotEmpty() && !paused("groq:whisper")) {
-            try {
-                return whisper(groqKey, wav)
-            } catch (e: GeminiException) {
-                pause("groq:whisper", e)
+        Prefs.providerKeys(c, "groq").forEachIndexed { i, groqKey ->
+            val slot = "groq#${i + 1}:whisper"
+            if (!paused(slot)) {
+                try {
+                    return whisper(groqKey, wav)
+                } catch (e: GeminiException) {
+                    pause(slot, e)
+                }
             }
         }
-        val key = Prefs.geminiKey(c)
-        if (key.isNotEmpty()) {
+        Prefs.geminiKeys(c).forEachIndexed { i, key ->
             for (model in listOf(Prefs.geminiModel(c), Prefs.FALLBACK_MODEL).distinct()) {
-                val slot = "gemini:$model"
+                val slot = "gemini#${i + 1}:$model"
                 if (paused(slot)) continue
                 try {
                     return Gemini.transcribe(key, model, wav)
@@ -514,18 +517,18 @@ object Llm {
 
     /** Antes de mandar para um reserva, troca áudios do histórico por texto (se der). */
     private fun transcribeAudioParts(c: Context, history: MutableList<JSONObject>) {
-        val groq = Prefs.providerKey(c, "groq")
+        val groq = Prefs.providerKeys(c, "groq").withIndex().firstOrNull { !paused("groq#${it.index + 1}:whisper") }?.value.orEmpty()
         for (content in history) {
             val parts = content.optJSONArray("parts") ?: continue
             for (j in 0 until parts.length()) {
                 val p = parts.optJSONObject(j) ?: continue
                 val data = p.optJSONObject("inlineData")?.optString("data").orEmpty()
                 if (data.isEmpty()) continue
-                if (groq.isEmpty() || paused("groq:whisper")) return
+                if (groq.isEmpty()) return
                 val said = try {
                     whisper(groq, android.util.Base64.decode(data, android.util.Base64.NO_WRAP))
                 } catch (e: GeminiException) {
-                    pause("groq:whisper", e)
+                    pause("groq#1:whisper", e)
                     return
                 }
                 parts.put(j, JSONObject().put("text", if (said.isBlank()) "(áudio sem fala)" else "(falou por voz) $said"))
@@ -537,10 +540,9 @@ object Llm {
 
     /** Pesquisa: Google pelo Gemini; se ele estiver fora, trechos do DuckDuckGo para o cérebro resumir. */
     fun webSearch(c: Context, query: String): JSONObject {
-        val key = Prefs.geminiKey(c)
-        if (key.isNotEmpty()) {
+        Prefs.geminiKeys(c).forEachIndexed { i, key ->
             for (model in listOf(Prefs.geminiModel(c), Prefs.FALLBACK_MODEL).distinct()) {
-                val slot = "gemini-busca:$model"
+                val slot = "gemini-busca#${i + 1}:$model"
                 if (paused(slot)) continue
                 try {
                     return Gemini.webSearch(key, model, query)
@@ -589,19 +591,21 @@ object Llm {
     fun testAll(c: Context): String {
         val lines = mutableListOf<String>()
         val ask = "Responda só: ok"
-        val geminiKey = Prefs.geminiKey(c)
-        if (geminiKey.isNotEmpty()) {
+        val geminiKeys = Prefs.geminiKeys(c)
+        if (geminiKeys.isEmpty()) lines += "⚪ Gemini: sem chave"
+        geminiKeys.forEachIndexed { i, key ->
             val model = Prefs.geminiModel(c)
+            val name = if (geminiKeys.size > 1) "Gemini chave ${i + 1}" else "Gemini"
             val t0 = System.currentTimeMillis()
             lines += try {
                 val body = JSONObject().put("contents", JSONArray().put(Gemini.userText(ask)))
-                Gemini.generate(geminiKey, model, body, quick)
-                pausedUntil.remove("gemini:$model")
-                "✅ Gemini ($model): ok em ${System.currentTimeMillis() - t0} ms"
+                Gemini.generate(key, model, body, quick)
+                pausedUntil.remove("gemini#${i + 1}:$model")
+                "✅ $name ($model): ok em ${System.currentTimeMillis() - t0} ms"
             } catch (e: GeminiException) {
-                "❌ Gemini ($model): ${e.message?.take(120)}"
+                "❌ $name ($model): ${e.message?.take(120)}"
             }
-        } else lines += "⚪ Gemini: sem chave"
+        }
         val backups = backups(c)
         if (backups.isEmpty()) lines += "⚪ Nenhum cérebro reserva cadastrado"
         for (b in backups) {
@@ -612,7 +616,7 @@ object Llm {
                     .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", ask)))
                 if (model.contains("gpt-oss") && (b.id == "groq" || b.id == "cerebras")) body.put("reasoning_effort", "low")
                 post("${b.base}/chat/completions", b.key, body)
-                pausedUntil.remove("${b.id}:$model")
+                pausedUntil.remove("${b.slot}:$model")
                 "✅ ${b.label} ($model): ok em ${System.currentTimeMillis() - t0} ms"
             } catch (e: GeminiException) {
                 "❌ ${b.label} ($model): ${e.message?.take(120)}"
