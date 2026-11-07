@@ -34,7 +34,7 @@ from pathlib import Path
 
 import acoes
 
-VERSION = "2.3"
+VERSION = "2.4"
 APP_NAME = "NaviPC"
 IS_WIN = sys.platform == "win32"
 BASE = Path(os.environ.get("APPDATA", Path.home())) / APP_NAME
@@ -544,6 +544,10 @@ def autoteste(ci=False):
             return r
 
         sem_travar("pc_tela", {"acao": "consultar"})
+        import telas
+        reg("estruturas das telas (DisplayConfig)", telas.tamanhos_ok(),
+            ", ".join(f"{n}={ctypes.sizeof(getattr(telas, n))}" for n in telas.TAMANHOS), True)
+        sem_travar("pc_telas", {"acao": "listar"})
         sem_travar("pc_saida_som", {"acao": "listar"})
         sem_travar("pc_saida_som", {"acao": "listar", "tipo": "microfone"})
         sem_travar("pc_volume_app", {"acao": "listar"})

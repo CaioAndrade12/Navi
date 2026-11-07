@@ -60,6 +60,9 @@ def steam():
             if any(p in n.lower() for p in ("redistributable", "proton", "steam linux runtime", "steamvr")):
                 continue
             jogos.append((n, "steam://rungameid/" + appid.group(1)))
+            pasta = re.search(r'"installdir"\s+"([^"]+)"', txt)
+            if pasta:
+                _PASTAS[n] = str(lib / "steamapps" / "common" / pasta.group(1))
     return jogos
 
 
@@ -83,7 +86,19 @@ def epic():
         else:
             uri = f"com.epicgames.launcher://apps/{app}?action=launch&silent=true"
         jogos.append((nome, uri))
+        if d.get("InstallLocation"):
+            _PASTAS[nome] = str(d["InstallLocation"])
     return jogos
+
+
+_PASTAS = {}
+
+
+def pastas():
+    """{nome do jogo: pasta onde está instalado} (Steam e Epic)."""
+    if not _PASTAS:
+        todos()
+    return dict(_PASTAS)
 
 
 def todos():

@@ -210,7 +210,7 @@ object PcClient {
         } else {
             sb.append("❌ Ação de teste falhou: ${st.optString("erro")}\n")
         }
-        if (info.optString("version") < "2.3") {
+        if (info.optString("version") < "2.4") {
             sb.append("\n⚠️ O NaviPC do computador está desatualizado. Baixe o NaviPC.exe novo e abra (substitua o antigo).")
         }
         sb.toString()

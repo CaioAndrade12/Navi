@@ -97,6 +97,48 @@ object SmartThings {
     suspend fun setVolume(c: Context, level: Int) = command(c, "audioVolume", "setVolume", JSONArray().put(level.coerceIn(0, 100)))
     suspend fun mute(c: Context, on: Boolean) = command(c, "audioMute", if (on) "mute" else "unmute")
     suspend fun input(c: Context, source: String) = command(c, "mediaInputSource", "setInputSource", JSONArray().put(source))
+
+    private fun key(s: String) = s.uppercase().replace(" ", "").replace("_", "")
+
+    /** Entrada atual (ex.: "HDMI1"), lida da TV pela nuvem. */
+    suspend fun currentInput(c: Context): String? = try {
+        val st = status(c)
+        (st.optJSONObject("mediaInputSource") ?: st.optJSONObject("samsungvd.mediaInputSource"))
+            ?.optJSONObject("inputSource")?.optString("value")?.ifEmpty { null }
+    } catch (_: Exception) {
+        null
+    }
+
+    /**
+     * Troca para a entrada pedida ("HDMI1".."HDMI4") usando o nome que a própria TV informa,
+     * e confere se trocou de verdade. Devolve a entrada em que a TV ficou.
+     */
+    suspend fun setInputChecked(c: Context, wanted: String): String {
+        val st = status(c)
+        val names = mutableListOf<String>()
+        for (cap in listOf("mediaInputSource", "samsungvd.mediaInputSource")) {
+            val arr = st.optJSONObject(cap)?.optJSONObject("supportedInputSources")?.optJSONArray("value") ?: continue
+            for (i in 0 until arr.length()) {
+                val v = arr.opt(i)
+                names += if (v is JSONObject) v.optString("id").ifEmpty { v.optString("name") } else v.toString()
+            }
+        }
+        val target = names.firstOrNull { key(it) == key(wanted) } ?: wanted
+        var lastError: Exception? = null
+        for (cap in listOf("mediaInputSource", "samsungvd.mediaInputSource")) {
+            try {
+                command(c, cap, "setInputSource", JSONArray().put(target))
+                repeat(4) {
+                    kotlinx.coroutines.delay(1000)
+                    val now = currentInput(c)
+                    if (now != null && key(now) == key(target)) return now
+                }
+            } catch (e: Exception) {
+                lastError = e
+            }
+        }
+        throw TvException(lastError?.message ?: "A TV não trocou para $wanted pela SmartThings.")
+    }
     suspend fun channel(c: Context, number: Int) = command(c, "tvChannel", "setTvChannel", JSONArray().put(number.toString()))
     suspend fun launchApp(c: Context, appId: String) = command(c, "custom.launchapp", "launchApp", JSONArray().put(appId))
 

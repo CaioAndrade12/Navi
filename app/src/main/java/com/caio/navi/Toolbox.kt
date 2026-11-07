@@ -97,28 +97,38 @@ object Toolbox {
             obj("entrada" to str("entrada desejada",
                 listOf("HDMI1", "HDMI2", "HDMI3", "HDMI4", "proximo_hdmi", "menu_de_fontes")), required = listOf("entrada"))
         ) { a ->
-            val e = a.s("entrada").uppercase()
+            val e = a.s("entrada").uppercase().replace(" ", "")
+            val hdmi = e.startsWith("HDMI") && e.length == 5
+            var cloudError = ""
+            // 1) SmartThings: escolhe a entrada exata e confere se a TV trocou mesmo.
+            val viaCloud = if (hdmi && SmartThings.configured(c)) {
+                try {
+                    SmartThings.setInputChecked(c, e)
+                } catch (ex: Exception) {
+                    cloudError = ex.message.orEmpty()
+                    null
+                }
+            } else null
+            if (viaCloud != null) ok("Pronto, a TV está no ${viaCloud.replace("HDMI", "HDMI ")}.") else {
+            // 2) Rede de casa: tecla da entrada (essa TV às vezes ignora; aí só o menu de fontes resolve).
             val key = when {
-                e.startsWith("HDMI") && e.length == 5 -> "KEY_$e"
+                hdmi -> "KEY_$e"
                 e == "PROXIMO_HDMI" -> "KEY_HDMI"
                 else -> "KEY_SOURCE"
             }
-            var how = ""
             try {
                 SamsungTv.keys(c, listOf(key))
-                how = "rede"
-            } catch (_: Exception) {
-            }
-            if (how.isEmpty() && SmartThings.configured(c) && key != "KEY_SOURCE") {
-                try {
-                    SmartThings.input(c, e)
-                    how = "smartthings"
-                } catch (_: Exception) {
+                when {
+                    key == "KEY_SOURCE" -> ok("Abri o menu de fontes da TV.")
+                    key == "KEY_HDMI" -> ok("Passei para a próxima entrada HDMI.")
+                    else -> ok("Mandei a TV ir para o ${e.replace("HDMI", "HDMI ")} pela rede, mas por ela não dá para conferir.")
+                        .put("dica", if (SmartThings.configured(c)) "SmartThings falhou: $cloudError"
+                        else "Configure o SmartThings nos ajustes para a troca de HDMI ser certeira.")
                 }
+            } catch (ex: Exception) {
+                fail("Não consegui trocar a entrada. " + listOf(cloudError, ex.message.orEmpty()).filter { it.isNotBlank() }.joinToString(" / "))
             }
-            if (how.isEmpty()) fail("Não consegui falar com a TV, nem pela rede nem pela SmartThings.")
-            else ok(if (key == "KEY_SOURCE") "Abri o menu de fontes da TV." else "Mudei a TV para ${e.replace("HDMI", "HDMI ")}.")
-                .put("dica", "Se não trocou, use tv_teclas: fonte, direita/esquerda e ok.")
+            }
         },
         Tool("tv_teclas", "Aperta teclas do controle da TV em sequência. Nomes aceitos: home, voltar, ok, cima, baixo, " +
             "esquerda, direita, play, pause, parar, avancar, retroceder, menu, sair, fonte, info, guia, mudo, volume_mais, " +

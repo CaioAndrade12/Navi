@@ -14,7 +14,7 @@ object ToolGroups {
 
     private val PC_SETTINGS = setOf(
         "pc_saida_som", "pc_volume_app", "pc_microfone", "pc_brilho", "pc_monitor", "pc_monitor_entrada", "pc_tela",
-        "pc_projetar", "pc_modo_escuro", "pc_configuracoes", "pc_plano_energia", "pc_tempo_tela", "pc_bluetooth",
+        "pc_projetar", "pc_telas", "pc_modo_escuro", "pc_configuracoes", "pc_plano_energia", "pc_tempo_tela", "pc_bluetooth",
         "pc_powershell", "pc_desligar_tela",
     )
     private val MUSIC = setOf("celular_tocar_musica", "celular_midia", "celular_tocando")

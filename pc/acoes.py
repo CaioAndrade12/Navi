@@ -560,8 +560,45 @@ def pc_tela(acao, resolucao=None, hz=None):
     return ok(f"Tela em {nw}x{nh} a {nf} Hz{aviso}. Se ficar ruim, é só pedir para voltar.")
 
 
-@tool("pc_projetar", "Escolhe como usar várias telas (TV no HDMI, segundo monitor), igual ao Win+P: só a tela do PC, "
-      "duplicar, estender ou só a segunda tela.",
+@tool("pc_telas", "Controla cada tela do PC (monitor 1, monitor 2, TV...): listar, ligar estendendo, desligar, "
+      "duplicar uma com a outra (ex.: a 1 com a 3) ou escolher a principal. Use para 3 telas ou mais.",
+      {"acao": S("o que fazer", ["listar", "estender", "desligar", "duplicar", "principal"]),
+       "tela": S("qual tela: número (1, 2, 3) ou nome (TV, LG...)"),
+       "com": S("para duplicar: a tela que ela vai copiar (ex.: 1)")}, ["acao"])
+def pc_telas(acao, tela=None, com=None):
+    import telas
+    if acao == "listar" or not tela:
+        lista = telas.listar()
+        desc = []
+        for t in lista:
+            extra = []
+            if t["principal"]:
+                extra.append("principal")
+            if not t["ativa"]:
+                extra.append("desligada")
+            if t["duplicada_com"]:
+                extra.append("duplicada com " + ", ".join(map(str, t["duplicada_com"])))
+            desc.append(f"{t['numero']}: {t['nome']}" + (f" ({', '.join(extra)})" if extra else ""))
+        return ok("Telas: " + "; ".join(desc) + ".")
+    if acao == "estender":
+        t = telas.estender(tela)
+        return ok(f"Tela {t['numero']} ({t['nome']}) estendida.")
+    if acao == "desligar":
+        t = telas.desligar(tela)
+        return ok(f"Tela {t['numero']} ({t['nome']}) desligada.")
+    if acao == "duplicar":
+        if not com:
+            return erro("Diga com qual tela duplicar (ex.: com a 1).")
+        a, b = telas.duplicar(com, tela)
+        return ok(f"Tela {b['numero']} ({b['nome']}) agora mostra o mesmo que a {a['numero']}.")
+    if acao == "principal":
+        t = telas.principal(tela)
+        return ok(f"A tela {t['numero']} ({t['nome']}) agora é a principal.")
+    return erro("Ação de tela desconhecida.")
+
+
+@tool("pc_projetar", "Igual ao Win+P, só para quando há duas telas: só a tela do PC, duplicar, estender ou só a "
+      "segunda tela. Com 3 telas ou mais (ex.: monitores + TV), use pc_telas.",
       {"modo": S("modo", ["so_pc", "duplicar", "estender", "so_segunda_tela"])}, ["modo"])
 def pc_projetar(modo):
     import tela
@@ -1054,20 +1091,62 @@ def processos():
     return sorted(nomes)
 
 
-@tool("pc_fechar", "Fecha um programa aberto no PC (pelo nome).", {"app": S("nome do programa")}, ["app"],
+def _processos_do_jogo(app):
+    """PIDs rodando de dentro da pasta do jogo pedido (Steam/Epic): jogos têm nomes de .exe estranhos."""
+    try:
+        import psutil
+    except ImportError:
+        return set()
+    pastas = jogos.pastas()
+    pontos, nome = jogos.melhor(app, list(pastas.keys()), minimo=60)
+    if not nome:
+        return set()
+    pasta = os.path.normcase(os.path.abspath(pastas[nome]))
+    pids = set()
+    for p in psutil.process_iter(["pid", "exe"]):
+        exe = p.info.get("exe") or ""
+        if exe and os.path.normcase(exe).startswith(pasta + os.sep):
+            pids.add(p.info["pid"])
+    return pids
+
+
+def _vivo(pid):
+    try:
+        import psutil
+        return psutil.pid_exists(pid)
+    except ImportError:
+        rc, out, _ = cmd(["tasklist", "/FI", f"PID eq {pid}", "/NH"])
+        return str(pid) in out
+
+
+@tool("pc_fechar", "Fecha um programa ou jogo aberto no PC (pelo nome). Se ele não fechar sozinho, força o "
+      "fechamento.", {"app": S("nome do programa ou jogo")}, ["app"],
       confirm="Vou fechar {app} no PC. Se tiver algo sem salvar, pode perder. Confirma?")
 def pc_fechar(app):
     abertas = [j for j in janelas.listar() if janelas.combina(j, app)]
-    if abertas:
-        for j in abertas:
-            janelas.fechar(j.hwnd)  # como clicar no X: o programa pode perguntar se quer salvar
-        return ok(f"Pedi para fechar {len(abertas)} janela(s) de {app}.")
-    procs = processos()
-    alvo = best_match(app, [p[:-4] for p in procs])
-    if not alvo:
-        return erro(f"Não achei \"{app}\" aberto no PC.")
-    cmd(["taskkill", "/IM", alvo + ".exe"])
-    return ok(f"Pedi para fechar {alvo}.")
+    pids = {j.pid for j in abertas} | _processos_do_jogo(app)
+    if not pids:
+        procs = processos()
+        alvo = best_match(app, [p[:-4] for p in procs])
+        if not alvo:
+            return erro(f"Não achei \"{app}\" aberto no PC.")
+        cmd(["taskkill", "/IM", alvo + ".exe"])
+        time.sleep(2.5)
+        if any(p.lower() == (alvo + ".exe").lower() for p in processos()):
+            cmd(["taskkill", "/F", "/T", "/IM", alvo + ".exe"])
+        return ok(f"Fechei {alvo}.")
+    for j in abertas:
+        janelas.fechar(j.hwnd)  # como clicar no X primeiro
+    fim = time.time() + 4
+    while time.time() < fim and any(_vivo(p) for p in pids):
+        time.sleep(0.4)
+    teimosos = [p for p in pids if _vivo(p)]
+    for p in teimosos:  # jogo que ignora o X: fecha à força
+        cmd(["taskkill", "/F", "/T", "/PID", str(p)])
+    time.sleep(0.8)
+    if any(_vivo(p) for p in teimosos):
+        return erro(f"{app} não quis fechar nem à força (talvez precise de administrador).")
+    return ok(f"Fechei {app}.")
 
 
 # ---------------------------------------------------------------- configurações do Windows
