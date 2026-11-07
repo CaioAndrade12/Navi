@@ -89,8 +89,12 @@
                 <Button android:id="@+id/btnFindTv" style="@style/RowBtn" android:text="Procurar TV" />
                 <Button android:id="@+id/btnTestTv" style="@style/RowBtn" android:text="Testar" />
             </LinearLayout>
-            <Switch android:id="@+id/irEnabled" style="@style/SwitchRow"
-                android:text="Usar o infravermelho do celular como reserva" />
+            <TextView style="@style/Hint" android:layout_marginTop="10dp"
+                android:text="Segunda via (SmartThings): se a TV não responder pela rede de casa, a Navi usa a nuvem da Samsung. Crie um token com todas as permissões de dispositivos e cole aqui." />
+            <Button android:id="@+id/btnStToken" style="@style/BtnSecondary" android:text="Criar token da SmartThings" />
+            <EditText android:id="@+id/stToken" style="@style/Field"
+                android:hint="Token da SmartThings" android:inputType="textPassword" />
+            <Button android:id="@+id/btnTestSt" style="@style/BtnSecondary" android:text="Testar SmartThings" />
             <TextView android:id="@+id/tvInfo" style="@style/Hint" />
         </LinearLayout>
 

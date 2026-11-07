@@ -106,13 +106,17 @@ object Toolbox {
             var how = ""
             try {
                 SamsungTv.keys(c, listOf(key))
-                how = "pela rede"
+                how = "rede"
             } catch (_: Exception) {
             }
-            if (Prefs.irEnabled(c) && key != "KEY_SOURCE" && IrRemote.sendSamsung(c, key)) {
-                how = if (how.isEmpty()) "pelo infravermelho" else "$how e pelo infravermelho"
+            if (how.isEmpty() && SmartThings.configured(c) && key != "KEY_SOURCE") {
+                try {
+                    SmartThings.input(c, e)
+                    how = "smartthings"
+                } catch (_: Exception) {
+                }
             }
-            if (how.isEmpty()) fail("Não consegui falar com a TV.")
+            if (how.isEmpty()) fail("Não consegui falar com a TV, nem pela rede nem pela SmartThings.")
             else ok(if (key == "KEY_SOURCE") "Abri o menu de fontes da TV." else "Mudei a TV para ${e.replace("HDMI", "HDMI ")}.")
                 .put("dica", "Se não trocou, use tv_teclas: fonte, direita/esquerda e ok.")
         },
@@ -134,8 +138,13 @@ object Toolbox {
             val n = a.optInt("numero", -1)
             if (n < 0) fail("Qual canal?") else {
                 val keys = n.toString().map { "KEY_$it" } + "KEY_ENTER"
-                val r = SamsungTv.keysWithFallback(c, keys)
-                ok(if (r == "ok") "Canal $n." else "Canal $n (pelo infravermelho).")
+                try {
+                    SamsungTv.keys(c, keys)
+                } catch (e: TvException) {
+                    if (!SmartThings.configured(c)) throw e
+                    SmartThings.channel(c, n)
+                }
+                ok("Canal $n.")
             }
         },
         Tool("tv_digitar", "Digita um texto no teclado aberto na TV (ex.: na busca do YouTube) e confirma.",
@@ -305,10 +314,16 @@ object Toolbox {
         ) { a -> PhoneActions.flashlight(c, a.optBoolean("ligar", true)) },
         Tool("celular_tocar_musica", "Toca no celular uma música, artista, álbum, playlist ou estilo (Spotify, YouTube Music " +
             "ou o app escolhido nos ajustes). Confere se começou a tocar.",
-            obj("busca" to str("o que tocar, ex.: \"Charlie Brown Jr\", \"Só os Loucos Sabem\", \"rock anos 80\""),
+            obj("busca" to str("o que tocar, ex.: \"Só os Loucos Sabem Charlie Brown Jr\", \"rock anos 80\""),
+                "musica" to str("nome da música, se for uma música específica"),
+                "artista" to str("artista/banda, se souber"),
+                "tipo" to str("o que é", listOf("musica", "artista", "album", "playlist")),
                 "app" to str("app pedido pelo usuário (opcional): spotify, youtube music, deezer, youtube..."),
                 required = listOf("busca"))
-        ) { a -> MediaControl.play(c, a.s("busca"), a.s("app").ifEmpty { null }) },
+        ) { a ->
+            MediaControl.play(c, a.s("busca"), a.s("app").ifEmpty { null }, a.s("tipo"),
+                a.s("musica").ifEmpty { null }, a.s("artista").ifEmpty { null })
+        },
         Tool("celular_midia", "Controla a música/vídeo tocando no celular: pausar, continuar, próxima, anterior ou parar.",
             obj("acao" to str("ação", listOf("pausar", "continuar", "proxima", "anterior", "parar")), required = listOf("acao"))
         ) { a -> MediaControl.control(c, a.s("acao")) },

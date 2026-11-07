@@ -267,7 +267,17 @@ object SamsungTv {
     }
 
     /** Abre um app pelo nome (aproximado): "youtube", "netflix", "globoplay"... */
-    suspend fun openApp(c: Context, name: String): String {
+    suspend fun openApp(c: Context, name: String): String = try {
+        openAppLocal(c, name)
+    } catch (e: TvException) {
+        val wanted = Brain.normalize(name).replace(" ", "")
+        val known = KNOWN_APPS.firstOrNull { Brain.normalize(it.name).replace(" ", "").contains(wanted) }
+        if (!SmartThings.configured(c) || known == null) throw e
+        SmartThings.launchApp(c, known.id)
+        known.name
+    }
+
+    private suspend fun openAppLocal(c: Context, name: String): String {
         val all = apps(c)
         val wanted = Brain.normalize(name).replace(" ", "")
         val app = all.firstOrNull { Brain.normalize(it.name).replace(" ", "") == wanted }
@@ -290,20 +300,25 @@ object SamsungTv {
         return app.name
     }
 
-    /** Liga a TV: Wake-on-LAN (se a TV permitir) + infravermelho do celular. */
+    /** Liga a TV: Wake-on-LAN pela rede de casa; se não acordar, pela nuvem (SmartThings). */
     suspend fun powerOn(c: Context): String {
         if (isOn(c)) return "A TV já está ligada."
         val mac = Prefs.tvMac(c)
         val wol = mac.isNotEmpty() && Lan.wakeOnLan(mac)
-        val ir = Prefs.irEnabled(c) && IrRemote.sendSamsung(c, "POWER_ON")
-        if (!wol && !ir) throw TvException("Não tenho como ligar a TV: falta o MAC dela e o infravermelho está indisponível.")
-        repeat(10) {
+        if (wol) repeat(3) {
             delay(1500)
             if (isOn(c)) return "TV ligada."
-            if (wol && it == 3) Lan.wakeOnLan(mac)
         }
-        return if (ir) "Mandei o sinal de ligar pelo infravermelho. Se não ligou, aponte o celular para a TV."
-        else "Mandei o sinal de ligar pela rede, mas a TV não respondeu. Ative 'Ligar com o celular' nas configurações de rede da TV."
+        if (SmartThings.configured(c)) {
+            SmartThings.power(c, true)
+            repeat(6) {
+                delay(1500)
+                if (isOn(c)) return "TV ligada."
+            }
+            return "Mandei ligar pela SmartThings. Ela deve ligar em instantes."
+        }
+        if (!wol) throw TvException("Não sei ligar a TV pela rede (falta o MAC dela). Configure o SmartThings nos ajustes.")
+        return "Mandei o sinal de ligar pela rede, mas a TV não respondeu. Ative 'Ligar com o celular' na TV ou configure o SmartThings."
     }
 
     suspend fun powerOff(c: Context): String {
@@ -314,21 +329,21 @@ object SamsungTv {
             } catch (_: Exception) {
             }
         }
-        if (Prefs.irEnabled(c) && IrRemote.sendSamsung(c, "POWER_OFF")) return "Mandei o sinal de desligar pelo infravermelho."
+        if (SmartThings.configured(c)) {
+            SmartThings.power(c, false)
+            return "TV desligada."
+        }
         return "A TV já parece estar desligada."
     }
 
-    /** Aperta teclas pela rede; se a TV não responder, tenta pelo infravermelho. */
+    /** Aperta teclas pela rede de casa; se a TV não responder, tenta pela SmartThings. */
     suspend fun keysWithFallback(c: Context, keys: List<String>): String = try {
         keys(c, keys)
         "ok"
     } catch (e: TvException) {
-        if (Prefs.irEnabled(c) && keys.all { IrRemote.SAMSUNG.containsKey(it) }) {
-            keys.forEach { IrRemote.sendSamsung(c, it) }
-            "Enviado pelo infravermelho (a TV não respondeu pela rede)."
-        } else {
-            throw e
-        }
+        if (!SmartThings.configured(c)) throw e
+        SmartThings.keys(c, keys)
+        "ok"
     }
 
     // ---------------- Volume exato e estado (UPnP RenderingControl, porta 9197) ----------------
@@ -482,7 +497,43 @@ object SamsungTv {
     }
 
     /** consultar, definir, aumentar, diminuir, mudo, tirar_mudo. */
+    /** Volume pela rede de casa; se a TV não responder por ela, pela SmartThings. */
     suspend fun volumeAction(c: Context, action: String, amount: Int?): JSONObject {
+        val local = try {
+            volumeLocal(c, action, amount)
+        } catch (e: TvException) {
+            if (!SmartThings.configured(c)) throw e
+            null
+        }
+        if (local != null && (local.optString("status") == "ok" || !SmartThings.configured(c))) return local
+        return volumeCloud(c, action, amount)
+    }
+
+    private suspend fun volumeCloud(c: Context, action: String, amount: Int?): JSONObject {
+        val now = SmartThings.volume(c)
+        return when (action) {
+            "consultar" -> if (now != null) ok("O volume da TV está em $now.").put("volume", now)
+            else fail("A TV não informou o volume.")
+            "definir" -> {
+                val v = (amount ?: return fail("Diga um número de 0 a 100.")).coerceIn(0, 100)
+                SmartThings.setVolume(c, v)
+                ok("Volume da TV em $v.")
+            }
+            "aumentar", "diminuir" -> {
+                val delta = (amount ?: 3).coerceIn(1, 50) * (if (action == "aumentar") 1 else -1)
+                val v = ((now ?: 15) + delta).coerceIn(0, 100)
+                SmartThings.setVolume(c, v)
+                ok("Volume da TV em $v.")
+            }
+            "mudo", "tirar_mudo" -> {
+                SmartThings.mute(c, action == "mudo")
+                ok(if (action == "mudo") "TV no mudo." else "Som da TV ligado.")
+            }
+            else -> fail("Ação de volume desconhecida: $action")
+        }
+    }
+
+    private suspend fun volumeLocal(c: Context, action: String, amount: Int?): JSONObject {
         val info = volume(c)
         return when (action) {
             "consultar" -> if (info != null) {

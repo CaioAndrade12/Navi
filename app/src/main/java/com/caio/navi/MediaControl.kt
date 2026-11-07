@@ -17,6 +17,7 @@ import android.os.SystemClock
 import android.provider.MediaStore
 import android.view.KeyEvent
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -141,11 +142,106 @@ object MediaControl {
         return ok("Tocando $what no ${player.label}.").put("_fim_da_conversa", true)
     }
 
-    /** Toca uma música, artista, álbum ou playlist. */
-    suspend fun play(c: Context, query: String, appWanted: String?): JSONObject {
+    private const val SPOTIFY = "com.spotify.music"
+    private val ua = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
+
+    /** Endereço exato no Spotify ("spotify:track:...") achado por uma busca na web. */
+    private fun findSpotify(query: String, type: String): String? = try {
+        val q = "$query site:open.spotify.com/$type"
+        val req = okhttp3.Request.Builder()
+            .url("https://html.duckduckgo.com/html/?kl=br-pt&q=" + java.net.URLEncoder.encode(q, "UTF-8"))
+            .header("User-Agent", ua).build()
+        val page = Gemini.http.newCall(req).execute().use { it.body?.string().orEmpty() }
+        Regex("open\\.spotify\\.com(?:%2F|/)(?:intl-[a-z]{2}(?:%2F|/))?$type(?:%2F|/)([A-Za-z0-9]{22})")
+            .find(page)?.groupValues?.get(1)?.let { "spotify:$type:$it" }
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun title(c: Context, pkg: String): String =
+        sessions(c).firstOrNull { it.packageName == pkg }?.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty()
+
+    /** Esperar tocar E ser outra música (senão é a antiga que só voltou). */
+    private suspend fun waitNew(c: Context, pkg: String, before: String, ms: Long): Boolean {
+        val end = SystemClock.elapsedRealtime() + ms
+        while (SystemClock.elapsedRealtime() < end) {
+            val ctl = sessions(c).firstOrNull { it.packageName == pkg }
+            if (ctl != null && isPlaying(ctl)) {
+                val now = ctl.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty()
+                if (now.isNotEmpty() && now != before) return true
+            }
+            delay(300)
+        }
+        return false
+    }
+
+    private fun searchExtras(type: String, song: String?, artist: String?) = Bundle().apply {
+        putString(MediaStore.EXTRA_MEDIA_FOCUS, when (type) {
+            "artist" -> MediaStore.Audio.Artists.ENTRY_CONTENT_TYPE
+            "album" -> MediaStore.Audio.Albums.ENTRY_CONTENT_TYPE
+            "playlist" -> "vnd.android.cursor.item/playlist"
+            else -> MediaStore.Audio.Media.ENTRY_CONTENT_TYPE
+        })
+        if (!song.isNullOrBlank()) putString(MediaStore.EXTRA_MEDIA_TITLE, song)
+        if (!artist.isNullOrBlank()) putString(MediaStore.EXTRA_MEDIA_ARTIST, artist)
+    }
+
+    /**
+     * Spotify (Premium): acha o endereço exato da música/álbum/playlist e manda o Spotify tocar
+     * aquele endereço. Confere que mudou de música; se não, tenta pela busca do próprio Spotify.
+     */
+    private suspend fun playSpotify(c: Context, query: String, type: String, song: String?, artist: String?): JSONObject? =
+        kotlinx.coroutines.coroutineScope {
+            val player = PLAYERS.first { it.pkg == SPOTIFY }
+            val uriJob = async(Dispatchers.IO) { kotlinx.coroutines.withTimeoutOrNull(6000) { findSpotify(query, type) } }
+            var ctl = sessions(c).firstOrNull { it.packageName == SPOTIFY }
+            if (ctl == null) {
+                // Abre o Spotify (sem tocar nada) enquanto a busca acontece.
+                val open = c.packageManager.getLaunchIntentForPackage(SPOTIFY)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (open != null) try { withContext(Dispatchers.Main) { c.startActivity(open) } } catch (_: Exception) {}
+                val end = SystemClock.elapsedRealtime() + 7000
+                while (ctl == null && SystemClock.elapsedRealtime() < end) {
+                    delay(300)
+                    ctl = sessions(c).firstOrNull { it.packageName == SPOTIFY }
+                }
+            }
+            val before = title(c, SPOTIFY)
+            val uri = uriJob.await()
+            val session = ctl
+            if (session != null && uri != null) {
+                session.transportControls.playFromUri(Uri.parse(uri), Bundle())
+                if (waitNew(c, SPOTIFY, before, 6000)) return@coroutineScope playingResult(c, player, query)
+            }
+            if (session != null) {
+                session.transportControls.playFromSearch(query, searchExtras(type, song, artist))
+                if (waitNew(c, SPOTIFY, before, 6000)) return@coroutineScope playingResult(c, player, query)
+            }
+            if (uri != null) {
+                val view = Intent(Intent.ACTION_VIEW, Uri.parse(uri)).setPackage(SPOTIFY).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                try { withContext(Dispatchers.Main) { c.startActivity(view) } } catch (_: Exception) {}
+                if (waitNew(c, SPOTIFY, before, 6000)) return@coroutineScope playingResult(c, player, query)
+                sessions(c).firstOrNull { it.packageName == SPOTIFY }?.transportControls?.play()
+                if (waitNew(c, SPOTIFY, before, 3000)) return@coroutineScope playingResult(c, player, query)
+            }
+            null
+        }
+
+    /** Toca uma música, artista, álbum ou playlist. [kind]: musica, artista, album, playlist. */
+    suspend fun play(
+        c: Context, query: String, appWanted: String?, kind: String = "", song: String? = null, artist: String? = null,
+    ): JSONObject {
         if (query.isBlank()) return control(c, "continuar")
         val player = choose(c, appWanted) ?: return playOnYouTube(c, query)
         if (!player.searchIntent) return playOnYouTube(c, query)
+        if (player.pkg == SPOTIFY) {
+            val type = when (kind) { "artista" -> "artist"; "album" -> "album"; "playlist" -> "playlist"; else -> "track" }
+            playSpotify(c, query, type, song, artist)?.let { return it }
+            if (locked(c)) return fail("Para abrir o Spotify preciso que o celular esteja desbloqueado.").put("_desbloquear", true)
+            if (!NaviNotificationService.isEnabled(c)) {
+                return fail("Para eu tocar música no Spotify, libere o acesso às notificações nos Ajustes da Navi.")
+            }
+            return fail("O Spotify não começou a tocar \"$query\". ${backgroundHint()}")
+        }
 
         // 1) App já aberto: pede pela sessão de mídia dele (funciona até com a tela apagada).
         sessions(c).firstOrNull { it.packageName == player.pkg }?.let { ctl ->

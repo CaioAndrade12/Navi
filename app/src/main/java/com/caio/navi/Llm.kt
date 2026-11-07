@@ -77,6 +77,22 @@ object Llm {
 
     fun hasBackups(c: Context) = backups(c).isNotEmpty()
 
+    /**
+     * Abre a conexão com o cérebro enquanto a pessoa ainda está falando: com internet ruim, só
+     * o "aperto de mão" da conexão segura leva quase um segundo. A conversa depois reaproveita.
+     */
+    fun warmUp(c: Context) {
+        val hosts = mutableListOf<String>()
+        if (Prefs.geminiKey(c).isNotEmpty()) hosts += "https://generativelanguage.googleapis.com/"
+        if (Prefs.providerKey(c, "groq").isNotEmpty()) hosts += "https://api.groq.com/"
+        for (h in hosts) Thread {
+            try {
+                quick.newCall(Request.Builder().url(h).head().build()).execute().close()
+            } catch (_: Exception) {
+            }
+        }.start()
+    }
+
     // ------------------------------------------------------------------ pausas
 
     private fun paused(slot: String) = (pausedUntil[slot] ?: 0L) > System.currentTimeMillis()
@@ -148,8 +164,10 @@ object Llm {
     // ------------------------------------------------------------------ conversa
 
     /** Responde no formato do Gemini (candidates/content/parts), venha a resposta de quem vier. */
+    /** [tools] vai para o Gemini; [lightTools] (só o assunto) para os reservas, que têm pouco token por minuto. */
     fun chat(
-        c: Context, system: String, history: MutableList<JSONObject>, tools: List<Tool>, thinking: String = "low",
+        c: Context, system: String, history: MutableList<JSONObject>, tools: List<Tool>,
+        lightTools: List<Tool> = tools, thinking: String = "low",
     ): JSONObject {
         val backups = backups(c)
         val geminiKey = Prefs.geminiKey(c)
@@ -160,7 +178,7 @@ object Llm {
             }
         }
         for (b in backups) for (model in b.models) {
-            slots += "${b.id}:$model" to { openAiChat(c, b, model, system, history, tools, thinking) }
+            slots += "${b.id}:$model" to { openAiChat(c, b, model, system, history, lightTools, thinking) }
         }
         if (slots.isEmpty()) throw GeminiException("Falta a chave da Gemini API nos ajustes.", 401)
 

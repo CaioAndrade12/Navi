@@ -120,7 +120,12 @@ object Prefs {
     fun setTvToken(c: Context, v: String) = put(c, "tv_token", v)
     fun tvPort(c: Context) = sp(c).getInt("tv_port", 0)
     fun setTvPort(c: Context, v: Int) = sp(c).edit().putInt("tv_port", v).apply()
-    fun irEnabled(c: Context) = bool(c, "ir", true)
+    fun irEnabled(c: Context) = false // infravermelho desativado de vez
+    /** Token pessoal da SmartThings (segunda via da TV, pela nuvem da Samsung). */
+    fun stToken(c: Context) = secret(c, "st_token").trim()
+    fun setStToken(c: Context, v: String) = putSecret(c, "st_token", v.trim())
+    fun stDevice(c: Context) = str(c, "st_device")
+    fun setStDevice(c: Context, v: String) = put(c, "st_device", v)
     fun setIrEnabled(c: Context, v: Boolean) = putBool(c, "ir", v)
 
     // ---- PC ----

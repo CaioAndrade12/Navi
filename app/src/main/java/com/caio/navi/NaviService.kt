@@ -310,6 +310,7 @@ class NaviService : Service() {
         if (now - lastTrigger < 2500) return
         lastTrigger = now
 
+        if (Prefs.ownBrain(this) && hasBrain()) Llm.warmUp(this) // conexão pronta antes de precisar
         if (!Prefs.ownBrain(this) || !hasBrain()) {
             // Modo antigo (ou sem chave do Gemini): abre o assistente do Google.
             val pause = Prefs.pauseSec(this)
@@ -353,7 +354,12 @@ class NaviService : Service() {
                 val brain = NaviCore.brain(this@NaviService)
                 // "Navi, liga a TV" de uma vez: transcreve o pedido enquanto o som toca.
                 var firstText: String? = null
-                if (command != null) {
+                var firstAudio: ByteArray? = null
+                if (command != null && Prefs.providerKey(this@NaviService, "groq").isEmpty()) {
+                    // Sem Groq: manda o áudio direto para a IA, que entende e age numa chamada só.
+                    launch { Sounds.playStart(this@NaviService, null) }
+                    firstAudio = command
+                } else if (command != null) {
                     setStatus("Entendendo...")
                     val sound = launch { Sounds.playStart(this@NaviService, null) }
                     firstText = withContext(Dispatchers.IO) {
@@ -368,8 +374,10 @@ class NaviService : Service() {
                 while (running && turns < 20) {
                     turns++
                     val ready = firstText
+                    val readyAudio = firstAudio
                     firstText = null
-                    val heardNow = if (ready != null) ready to null else {
+                    firstAudio = null
+                    val heardNow = if (ready != null) ready to null else if (readyAudio != null) null to readyAudio else {
                         if (turns == 1 && command != null) Sounds.playStart(this@NaviService, speaker) // não entendeu o pedido junto
                         setStatus(if (followUp) "Ouvindo (fale sem dizer Navi)..." else "Ouvindo...")
                         hear(if (followUp) FOLLOW_UP_MS else 7000L) ?: break

@@ -53,6 +53,14 @@ class SettingsActivity : Activity() {
         btn(R.id.btnTestBrains) { busy("Testando os cérebros") { withContext(Dispatchers.IO) { Llm.testAll(this@SettingsActivity) } } }
         btn(R.id.btnFindTv) { findTv() }
         btn(R.id.btnTestTv) { testTv() }
+        btn(R.id.btnStToken) { open(Intent(Intent.ACTION_VIEW, Uri.parse(SmartThings.TOKEN_URL))) }
+        btn(R.id.btnTestSt) {
+            busy("Procurando a TV na SmartThings") {
+                val (_, name) = SmartThings.findTv(this@SettingsActivity)
+                val vol = SmartThings.volume(this@SettingsActivity)
+                "Achei a TV \"$name\" na SmartThings." + (if (vol != null) " Volume agora: $vol." else "")
+            }
+        }
         btn(R.id.btnFindPc) { findPc() }
         btn(R.id.btnPairPc) { pairPc() }
         btn(R.id.btnRefreshPc) { busy("Testando o PC") { PcClient.diagnose(this) } }
@@ -164,7 +172,7 @@ class SettingsActivity : Activity() {
         sw(R.id.confirm).isChecked = Prefs.confirmActions(this)
         sw(R.id.lockProtect).isChecked = Prefs.lockProtection(this)
         et(R.id.tvIp).setText(Prefs.tvIp(this))
-        sw(R.id.irEnabled).isChecked = Prefs.irEnabled(this)
+        et(R.id.stToken).setText(Prefs.stToken(this))
         et(R.id.pcHost).setText(Prefs.pcHost(this))
         et(R.id.email).setText(Prefs.emailAddress(this))
         et(R.id.emailPass).setText(Prefs.emailPassword(this))
@@ -238,7 +246,11 @@ class SettingsActivity : Activity() {
             Prefs.setTvToken(this, "")
             Prefs.setTvPort(this, 0)
         }
-        Prefs.setIrEnabled(this, sw(R.id.irEnabled).isChecked)
+        val newSt = et(R.id.stToken).text.toString().trim()
+        if (newSt != Prefs.stToken(this)) {
+            Prefs.setStToken(this, newSt)
+            Prefs.setStDevice(this, "")
+        }
         val newHost = et(R.id.pcHost).text.toString().trim()
         if (newHost.isNotEmpty() || Prefs.pcKey(this).isEmpty()) Prefs.setPcHost(this, newHost)
         Prefs.setEmailAddress(this, et(R.id.email).text.toString())
@@ -393,7 +405,7 @@ class SettingsActivity : Activity() {
             appendLine("${mark(getSystemService(android.app.NotificationManager::class.java).isNotificationPolicyAccessGranted)}  Não perturbe (modo silencioso)")
             appendLine("${mark(Settings.canDrawOverlays(this@SettingsActivity))}  Sobrepor outros apps")
             appendLine("${mark(pm.isIgnoringBatteryOptimizations(packageName))}  Sem restrição de bateria")
-            append("${mark(IrRemote.available(this@SettingsActivity))}  Infravermelho do celular")
+            append("${mark(SmartThings.configured(this@SettingsActivity))}  SmartThings (segunda via da TV)")
         }
         val tvIp = Prefs.tvIp(this)
         findViewById<TextView>(R.id.tvInfo).text = when {
