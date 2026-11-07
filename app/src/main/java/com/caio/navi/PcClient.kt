@@ -252,6 +252,6 @@ object PcClient {
     private fun fill(template: String, args: JSONObject): String {
         var s = template
         for (k in args.keys()) s = s.replace("{$k}", args.opt(k)?.toString().orEmpty())
-        return s.replace(Regex("\\{\\w+}"), "")
+        return s.replace(Regex("\\{\\w+\\}"), "") // no Android a chave de fechar precisa de escape
     }
 }
