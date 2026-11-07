@@ -89,6 +89,10 @@
             </LinearLayout>
             <TextView style="@style/Hint" android:layout_marginTop="10dp"
                 android:text="Segunda via (SmartThings): se a TV não responder pela rede de casa, a Navi usa a nuvem da Samsung. Crie um token com todas as permissões de dispositivos e cole aqui." />
+            <TextView style="@style/Hint" android:layout_marginTop="10dp"
+                android:text="Ordem das entradas na faixa que aparece quando você aperta Source no controle, da esquerda para a direita. A Navi troca de HDMI andando nessa faixa." />
+            <EditText android:id="@+id/tvSources" style="@style/Field"
+                android:hint="Ex.: TV, HDMI1, HDMI2, HDMI3, HDMI4" android:inputType="text" />
             <Button android:id="@+id/btnStToken" style="@style/BtnSecondary" android:text="Criar token da SmartThings" />
             <EditText android:id="@+id/stToken" style="@style/Field"
                 android:hint="Token da SmartThings" android:inputType="textPassword" />

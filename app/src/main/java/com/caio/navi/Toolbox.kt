@@ -62,7 +62,7 @@ object Toolbox {
         t.name.startsWith("email_") -> t.with(feature = "gmail", personal = true, untrusted = true)
         t.name == "celular_ligar_para" -> t.with(feature = "ligacoes", personal = true, effect = true)
         t.name == "pesquisar_web" -> t.with(feature = "web", untrusted = true)
-        t.name.startsWith("memoria_") -> t.with(feature = "memoria", personal = true, effect = true)
+        t.name.startsWith("memoria_") -> t.with(feature = "memoria", effect = true)
         t.name == "lembrete_listar" -> t.with(personal = true)
         else -> t
     }
@@ -93,41 +93,48 @@ object Toolbox {
         Tool("tv_listar_apps", "Lista os apps instalados na TV.") { _ ->
             JSONObject().put("status", "ok").put("apps", JSONArray(SamsungTv.apps(c).map { it.name }))
         },
-        Tool("tv_entrada", "Troca a entrada da TV (HDMI 1 a 4) ou abre o menu de fontes.",
+        Tool("tv_entrada", "Troca a entrada da TV (HDMI 1 a 4), passa para a próxima ou abre o menu de fontes.",
             obj("entrada" to str("entrada desejada",
                 listOf("HDMI1", "HDMI2", "HDMI3", "HDMI4", "proximo_hdmi", "menu_de_fontes")), required = listOf("entrada"))
         ) { a ->
             val e = a.s("entrada").uppercase().replace(" ", "")
             val hdmi = e.startsWith("HDMI") && e.length == 5
-            var cloudError = ""
-            // 1) SmartThings: escolhe a entrada exata e confere se a TV trocou mesmo.
-            val viaCloud = if (hdmi && SmartThings.configured(c)) {
-                try {
-                    SmartThings.setInputChecked(c, e)
-                } catch (ex: Exception) {
-                    cloudError = ex.message.orEmpty()
-                    null
+            val nome = e.replace("HDMI", "HDMI ")
+            when {
+                e == "PROXIMO_HDMI" -> { SamsungTv.keysWithFallback(c, listOf("KEY_HDMI")); ok("Passei para a próxima entrada.") }
+                !hdmi -> { SamsungTv.keysWithFallback(c, listOf("KEY_SOURCE")); ok("Abri o menu de fontes da TV.") }
+                else -> {
+                    // 1) Pela faixa de fontes, na rede de casa (o jeito que essa TV sempre obedece).
+                    val local = try { SamsungTv.sourceByMenu(c, e) } catch (_: Exception) { false }
+                    // 2) Confere pela SmartThings (se tiver) e, se não trocou, tenta por ela.
+                    if (SmartThings.configured(c)) {
+                        if (local) kotlinx.coroutines.delay(2500)
+                        val now = if (local) SmartThings.currentInput(c) else null
+                        if (now != null && now.uppercase().replace(" ", "") == e) ok("Pronto, a TV está no $nome.")
+                        else try {
+                            SmartThings.setInputChecked(c, e)
+                            ok("Pronto, a TV está no $nome.")
+                        } catch (ex: Exception) {
+                            if (local) ok("Mudei para o $nome pela faixa de fontes.")
+                                .put("dica", "Se caiu na entrada errada, a ordem das fontes pode ser outra: pergunte a ordem e use tv_ordem_fontes.")
+                            else fail("Não consegui trocar a entrada: ${ex.message}")
+                        }
+                    } else if (local) {
+                        ok("Mudei para o $nome pela faixa de fontes.")
+                            .put("dica", "Se caiu na entrada errada, a ordem das fontes pode ser outra: pergunte a ordem e use tv_ordem_fontes.")
+                    } else fail("Não consegui falar com a TV pela rede. Ela está ligada?")
                 }
-            } else null
-            if (viaCloud != null) ok("Pronto, a TV está no ${viaCloud.replace("HDMI", "HDMI ")}.") else {
-            // 2) Rede de casa: tecla da entrada (essa TV às vezes ignora; aí só o menu de fontes resolve).
-            val key = when {
-                hdmi -> "KEY_$e"
-                e == "PROXIMO_HDMI" -> "KEY_HDMI"
-                else -> "KEY_SOURCE"
             }
-            try {
-                SamsungTv.keys(c, listOf(key))
-                when {
-                    key == "KEY_SOURCE" -> ok("Abri o menu de fontes da TV.")
-                    key == "KEY_HDMI" -> ok("Passei para a próxima entrada HDMI.")
-                    else -> ok("Mandei a TV ir para o ${e.replace("HDMI", "HDMI ")} pela rede, mas por ela não dá para conferir.")
-                        .put("dica", if (SmartThings.configured(c)) "SmartThings falhou: $cloudError"
-                        else "Configure o SmartThings nos ajustes para a troca de HDMI ser certeira.")
-                }
-            } catch (ex: Exception) {
-                fail("Não consegui trocar a entrada. " + listOf(cloudError, ex.message.orEmpty()).filter { it.isNotBlank() }.joinToString(" / "))
-            }
+        },
+        Tool("tv_ordem_fontes", "Guarda a ordem das entradas na faixa de fontes da TV (botão Source), da esquerda para a " +
+            "direita, ex.: TV, HDMI1, HDMI2. Use quando ele disser a ordem ou se a troca de HDMI cair na entrada errada.",
+            obj("ordem" to strList("entradas da esquerda para a direita, ex.: [\"TV\", \"HDMI1\", \"HDMI2\"]"), required = listOf("ordem"))
+        ) { a ->
+            val arr = a.optJSONArray("ordem") ?: JSONArray()
+            val list = (0 until arr.length()).map { arr.getString(it) }.filter { it.isNotBlank() }
+            if (list.isEmpty()) fail("Diga a ordem das entradas.") else {
+                Prefs.setTvSources(c, list)
+                ok("Guardei a ordem das fontes: ${Prefs.tvSources(c).joinToString(", ")}.")
             }
         },
         Tool("tv_teclas", "Aperta teclas do controle da TV em sequência. Nomes aceitos: home, voltar, ok, cima, baixo, " +
@@ -396,6 +403,25 @@ object Toolbox {
                 Prefs.setMemories(c, Prefs.memories(c).filter { it != fact } + fact)
                 ok("Vou lembrar disso.")
             }
+        },
+        Tool("rotina_salvar", "Salva (ou troca) uma rotina com nome, ex.: \"modo jogo\" = \"ligar a TV no HDMI 2, " +
+            "estender a tela 3 do PC e som no headset\". Depois, quando ele disser o nome, faça os passos.",
+            obj("nome" to str("nome da rotina, ex.: modo jogo"), "passos" to str("o que fazer, na ordem, em uma frase"),
+                required = listOf("nome", "passos"))
+        ) { a ->
+            val nome = a.s("nome").lowercase()
+            if (nome.isEmpty() || a.s("passos").isEmpty()) fail("Diga o nome e os passos.") else {
+                Prefs.setRoutines(c, Prefs.routines(c) + (nome to a.s("passos")))
+                ok("Rotina \"$nome\" salva.")
+            }
+        },
+        Tool("rotina_apagar", "Apaga uma rotina pelo nome.",
+            obj("nome" to str("nome da rotina"), required = listOf("nome"))
+        ) { a ->
+            val nome = a.s("nome").lowercase()
+            val all = Prefs.routines(c)
+            if (nome !in all) fail("Não tenho a rotina \"$nome\". Tenho: ${all.keys.joinToString().ifEmpty { "nenhuma" }}.")
+            else { Prefs.setRoutines(c, all - nome); ok("Rotina \"$nome\" apagada.") }
         },
         Tool("memoria_apagar", "Esquece fatos guardados que contenham um trecho.",
             obj("trecho" to str("trecho do fato a esquecer"), required = listOf("trecho"))

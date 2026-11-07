@@ -44,7 +44,7 @@ object ToolGroups {
     val IDS = GROUPS.map { it.id }
 
     /** Sempre vão junto: são pequenas e servem para qualquer assunto. */
-    private val CORE = setOf("pesquisar_web", "memoria_salvar", "memoria_apagar", "pc_ligar")
+    private val CORE = setOf("pesquisar_web", "memoria_salvar", "memoria_apagar", "rotina_salvar", "rotina_apagar", "pc_ligar")
     private val OPEN = Regex("\\b(abre|abrir|abra|fecha|fechar|feche|inicia|iniciar|executa)\\b")
     private val PC_WORDS = GROUPS.first { it.id == "pc" }.words
     private val TV_WORDS = GROUPS.first { it.id == "tv" }.words

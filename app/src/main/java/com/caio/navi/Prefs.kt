@@ -131,6 +131,11 @@ object Prefs {
     fun stToken(c: Context) = secret(c, "st_token").trim()
     fun setStToken(c: Context, v: String) = putSecret(c, "st_token", v.trim())
     fun stDevice(c: Context) = str(c, "st_device")
+    /** Ordem das entradas na faixa de fontes da TV (botão Source), da esquerda para a direita. */
+    fun tvSources(c: Context) = str(c, "tv_sources", "TV,HDMI1,HDMI2,HDMI3,HDMI4")
+        .split(",").map { it.trim().uppercase().replace(" ", "") }.filter { it.isNotEmpty() }
+    fun setTvSources(c: Context, list: List<String>) =
+        put(c, "tv_sources", list.joinToString(",") { it.trim().uppercase().replace(" ", "") })
     fun setStDevice(c: Context, v: String) = put(c, "st_device", v)
     fun setIrEnabled(c: Context, v: Boolean) = putBool(c, "ir", v)
 
@@ -187,6 +192,16 @@ object Prefs {
     fun setRemindersRaw(c: Context, v: String) = put(c, "reminders", v)
 
     // ---- Memória de longo prazo ----
+    /** Rotinas com nome ("modo jogo" -> "TV no HDMI 2, PC estendendo a tela 3, som no headset"). */
+    fun routines(c: Context): Map<String, String> = try {
+        val o = org.json.JSONObject(str(c, "routines", "{}"))
+        o.keys().asSequence().associateWith { o.getString(it) }
+    } catch (_: Exception) {
+        emptyMap()
+    }
+
+    fun setRoutines(c: Context, m: Map<String, String>) = put(c, "routines", org.json.JSONObject(m).toString())
+
     fun memories(c: Context): List<String> = try {
         val a = JSONArray(str(c, "memories", "[]"))
         (0 until a.length()).map { a.getString(it) }

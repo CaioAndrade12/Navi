@@ -136,8 +136,14 @@ object Llm {
         return list
     }
 
-    /** Os primeiros modelos da lista (para não ficar testando dezenas quando todos estão sem cota). */
-    private fun geminiTop(c: Context) = geminiModels(c).take(5)
+    /** Os melhores modelos que não estão em pausa em nenhuma chave (até 5). */
+    private fun geminiTop(c: Context): List<String> {
+        ensure(c)
+        val all = geminiModels(c)
+        val keys = Prefs.geminiKeys(c).size.coerceAtLeast(1)
+        val usable = all.filter { m -> (1..keys).any { !paused("gemini#$it:$m") } }
+        return (usable.ifEmpty { all }).take(5)
+    }
 
     /**
      * Abre a conexão com o cérebro enquanto a pessoa ainda está falando: com internet ruim, só
@@ -157,7 +163,34 @@ object Llm {
 
     // ------------------------------------------------------------------ pausas
 
+    /** As pausas ficam salvas: depois de reiniciar, a Navi não volta a tentar modelo que não serve. */
+    @Volatile private var store: android.content.SharedPreferences? = null
+
+    private fun ensure(c: Context) {
+        if (store != null) return
+        val sp = c.applicationContext.getSharedPreferences("navi_pausas", Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        for ((k, v) in sp.all) {
+            val parts = v.toString().split("|", limit = 2)
+            val until = parts[0].toLongOrNull() ?: continue
+            if (until > now) {
+                pausedUntil[k] = until
+                pauseWhy[k] = parts.getOrElse(1) { "pausa" }
+            }
+        }
+        store = sp
+    }
+
+    private fun persist(slot: String) {
+        val sp = store ?: return
+        val until = pausedUntil[slot] ?: return
+        if (until - System.currentTimeMillis() > 2 * 60_000L) sp.edit().putString(slot, "$until|${pauseWhy[slot]}").apply()
+    }
+
     private fun paused(slot: String) = (pausedUntil[slot] ?: 0L) > System.currentTimeMillis()
+
+    /** 429 com "limit: 0" = esse modelo não existe no plano grátis desta chave (não é cota acabada). */
+    private fun notInPlan(e: GeminiException) = e.code == 429 && Regex("limit:\\s*0\\b").containsMatchIn(e.message.orEmpty())
 
     private fun pause(slot: String, e: GeminiException) {
         Log.w("Navi", "cérebro $slot falhou (${e.code}): ${e.message?.take(300)}")
@@ -165,23 +198,26 @@ object Llm {
         if (ms > 0) {
             pausedUntil[slot] = System.currentTimeMillis() + ms
             pauseWhy[slot] = when {
+                notInPlan(e) -> "não disponível no seu plano"
                 e.code == 429 || e.code == 413 -> "limite de uso"
                 e.code == 401 || e.code == 403 -> "chave recusada"
                 e.code == 404 -> "modelo não encontrado"
                 e.code == -1 -> "sem conexão"
                 else -> "fora do ar"
             }
+            persist(slot)
         }
     }
 
     private fun pauseFor(e: GeminiException): Long {
         val msg = e.message.orEmpty()
         return when {
+            notInPlan(e) -> 7 * 24 * 3_600_000L
             e.code == 429 || e.code == 413 -> retryAfter(msg) ?: if (Regex(
                     "per ?day|daily|PerDay|RPD|TPD|tokens per day|requests per day", RegexOption.IGNORE_CASE
                 ).containsMatchIn(msg)) 60 * 60_000L else 60_000L
-            e.code == 401 || e.code == 403 -> 10 * 60_000L
-            e.code == 404 -> 6 * 60 * 60_000L
+            e.code == 401 -> 10 * 60_000L
+            e.code == 403 || e.code == 404 -> 3 * 24 * 3_600_000L // modelo sem permissão ou que não existe
             e.code == -1 || e.code >= 500 -> 20_000L
             else -> 0L
         }
@@ -233,6 +269,7 @@ object Llm {
         c: Context, system: String, history: MutableList<JSONObject>, tools: List<Tool>,
         lightTools: List<Tool> = tools, thinking: String = "low",
     ): JSONObject {
+        ensure(c)
         val backups = backups(c)
         val geminiKeys = Prefs.geminiKeys(c)
         val slots = mutableListOf<Pair<String, () -> JSONObject>>()
@@ -657,18 +694,28 @@ object Llm {
         val ask = "Responda só: ok"
         val geminiKeys = Prefs.geminiKeys(c)
         if (geminiKeys.isEmpty()) lines += "⚪ Gemini: sem chave"
+        ensure(c)
         geminiKeys.forEachIndexed { i, key ->
-            val model = geminiModels(c).firstOrNull { !paused("gemini#${i + 1}:$it") } ?: geminiModels(c).first()
             val name = if (geminiKeys.size > 1) "Gemini chave ${i + 1}" else "Gemini"
-            val t0 = System.currentTimeMillis()
-            lines += try {
-                val body = JSONObject().put("contents", JSONArray().put(Gemini.userText(ask)))
-                Gemini.generate(key, model, body, quick)
-                pausedUntil.remove("gemini#${i + 1}:$model")
-                "✅ $name ($model): ok em ${System.currentTimeMillis() - t0} ms"
-            } catch (e: GeminiException) {
-                "❌ $name ($model): ${e.message?.take(120)}"
+            var working: String? = null
+            val failed = mutableListOf<String>()
+            for (model in geminiModels(c).take(8)) {
+                val slot = "gemini#${i + 1}:$model"
+                val t0 = System.currentTimeMillis()
+                try {
+                    val body = JSONObject().put("contents", JSONArray().put(Gemini.userText(ask)))
+                    Gemini.generate(key, model, body, quick)
+                    pausedUntil.remove(slot)
+                    store?.edit()?.remove(slot)?.apply()
+                    working = "$model (${System.currentTimeMillis() - t0} ms)"
+                    break
+                } catch (e: GeminiException) {
+                    pause(slot, e)
+                    failed += "$model: ${pauseWhy[slot] ?: e.message?.take(60)}"
+                }
             }
+            lines += if (working != null) "✅ $name vai usar $working" else "❌ $name: nenhum modelo funcionou agora"
+            if (failed.isNotEmpty()) lines += "   (pulados: ${failed.joinToString("; ")})"
         }
         val backups = backups(c)
         if (backups.isEmpty()) lines += "⚪ Nenhum cérebro reserva cadastrado"

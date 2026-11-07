@@ -336,6 +336,23 @@ object SamsungTv {
         return "A TV já parece estar desligada."
     }
 
+    /**
+     * Troca de entrada como a pessoa faz no controle: abre a faixa de fontes (Source), vai até o
+     * começo dela e anda até a entrada pedida. Funciona só pela rede de casa, sem internet.
+     */
+    suspend fun sourceByMenu(c: Context, wanted: String): Boolean {
+        val order = Prefs.tvSources(c)
+        val idx = order.indexOf(wanted.uppercase().replace(" ", ""))
+        if (idx < 0) return false
+        keys(c, listOf("KEY_SOURCE"))
+        delay(1800) // a faixa demora um pouco para aparecer nessa TV
+        keys(c, List(order.size + 3) { "KEY_LEFT" }, gapMs = 220)
+        if (idx > 0) keys(c, List(idx) { "KEY_RIGHT" }, gapMs = 320)
+        delay(250)
+        keys(c, listOf("KEY_ENTER"))
+        return true
+    }
+
     /** Aperta teclas pela rede de casa; se a TV não responder, tenta pela SmartThings. */
     suspend fun keysWithFallback(c: Context, keys: List<String>): String = try {
         keys(c, keys)

@@ -73,6 +73,31 @@ class Brain(private val ctx: Context) {
     fun reset() {
         history.clear()
         pending = null
+        save()
+    }
+
+    // A conversa fica guardada num arquivo: sobrevive a fechar o app, reiniciar o celular e bloquear a tela.
+    private val file = java.io.File(ctx.filesDir, "conversa.json")
+
+    init {
+        try {
+            if (file.exists()) {
+                val o = JSONObject(file.readText())
+                lastUse = o.optLong("lastUse")
+                val arr = o.optJSONArray("history") ?: JSONArray()
+                for (i in 0 until arr.length()) history += arr.getJSONObject(i)
+            }
+        } catch (_: Exception) {
+            history.clear()
+        }
+    }
+
+    private fun save() {
+        try {
+            if (pending != null) return
+            file.writeText(JSONObject().put("lastUse", lastUse).put("history", JSONArray(history)).toString())
+        } catch (_: Exception) {
+        }
     }
 
     /**
@@ -81,12 +106,9 @@ class Brain(private val ctx: Context) {
     suspend fun handle(text: String?, audioWav: ByteArray? = null, followUp: Boolean = false): Reply = lock.withLock {
         withContext(Dispatchers.IO) {
             val now = System.currentTimeMillis()
-            if (now - lastUse > 30 * 60_000L) reset() // conversa nova depois de 30 min parada
+            if (now - lastUse > 12 * 3_600_000L) reset() // só começa do zero depois de 12 h sem conversar
             lastUse = now
-            // Celular acabou de ser bloqueado: esquece a conversa feita com ele desbloqueado.
-            val locked = isLocked()
-            if (locked && lastLocked == false && Prefs.lockProtection(ctx)) reset()
-            lastLocked = locked
+            lastLocked = isLocked()
             endAfterReply = false
             // Se algo der errado no meio, o histórico volta a como estava (nunca fica pela metade).
             var rollbackTo = history.size
@@ -123,6 +145,7 @@ class Brain(private val ctx: Context) {
                     history[userIndex] = Gemini.userText("(mensagem de voz do usuário, já respondida)")
                 }
                 trimHistory()
+                save()
                 reply
             } catch (e: Throwable) {
                 pending = null
@@ -370,16 +393,22 @@ class Brain(private val ctx: Context) {
             append("Agora: $now (Brasília).\n")
             if (disabled.isNotEmpty()) append("Desligado pelo $name nos ajustes: ${disabled.joinToString()}.\n")
             if (locked) append("Celular bloqueado: para mensagens, e-mails, ligações e memórias o app pede para desbloquear.\n")
+            append("Memória: quando ele contar algo útil para o futuro (preferências, qual HDMI é o quê, apelidos, ")
+            append("como ele gosta das coisas), guarde com memoria_salvar sem esperar ele pedir. Quando ele descrever ")
+            append("um modo/rotina (\"modo jogo é...\"), salve com rotina_salvar. Quando ele disser o nome de uma ")
+            append("rotina, faça todos os passos dela.\n")
             if (mem.isNotEmpty()) append("Lembre sempre: ${mem.joinToString("; ")}.\n")
+            val rotinas = Prefs.routines(ctx)
+            if (rotinas.isNotEmpty()) append("Rotinas: ${rotinas.entries.joinToString("; ") { "${it.key} = ${it.value}" }}.\n")
         }
     }
 
     private fun trimHistory() {
         if (pending != null) return
         shrinkOldResults()
-        if (history.size <= 24) return
+        if (history.size <= 60) return
         // Corta pelo começo, sempre começando numa fala do usuário (não numa resposta de ferramenta).
-        var cut = history.size - 16
+        var cut = history.size - 44
         while (cut < history.size) {
             val c = history[cut]
             val first = c.optJSONArray("parts")?.optJSONObject(0)

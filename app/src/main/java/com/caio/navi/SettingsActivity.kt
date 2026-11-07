@@ -171,6 +171,7 @@ class SettingsActivity : Activity() {
         sw(R.id.lockProtect).isChecked = Prefs.lockProtection(this)
         et(R.id.tvIp).setText(Prefs.tvIp(this))
         et(R.id.stToken).setText(Prefs.stToken(this))
+        et(R.id.tvSources).setText(Prefs.tvSources(this).joinToString(", "))
         et(R.id.pcHost).setText(Prefs.pcHost(this))
         et(R.id.email).setText(Prefs.emailAddress(this))
         et(R.id.emailPass).setText(Prefs.emailPassword(this))
@@ -212,6 +213,8 @@ class SettingsActivity : Activity() {
             Prefs.setTvToken(this, "")
             Prefs.setTvPort(this, 0)
         }
+        et(R.id.tvSources).text.toString().split(",").filter { it.isNotBlank() }
+            .takeIf { it.isNotEmpty() }?.let { Prefs.setTvSources(this, it) }
         val newSt = et(R.id.stToken).text.toString().trim()
         if (newSt != Prefs.stToken(this)) {
             Prefs.setStToken(this, newSt)
